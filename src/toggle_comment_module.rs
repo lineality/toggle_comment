@@ -3716,3 +3716,735 @@ mod indent_tests {
         ]);
     }
 }
+
+// ============================================================================
+// INDENT/UNINDENT RANGE FUNCTIONS
+// ============================================================================
+
+/// Add 4 spaces to the start of multiple lines (range, inclusive)
+///
+/// # Overview
+/// Adds exactly 4 spaces at the beginning of each line in the specified range.
+/// Both start_line and end_line are included in the operation.
+///
+/// # Arguments
+/// * `file_path` - Path to the source file
+/// * `start_line` - Zero-indexed first line to indent (inclusive)
+/// * `end_line` - Zero-indexed last line to indent (inclusive)
+///
+/// # Returns
+/// * `Ok(())` - Lines indented successfully
+/// * `Err(IndentError)` - Specific error code
+///
+/// # Safety
+/// - Uses same backup system as toggle_comment
+/// - Atomic file operations
+/// - No heap allocation during processing
+/// - Preserves line endings (LF/CRLF/none)
+///
+/// # Example
+/// ```no_run
+/// use toggle_comment_module::indent_range;
+///
+/// // Indent lines 5 through 10 (inclusive)
+/// match indent_range("./src/main.rs", 5, 10) {
+///     Ok(()) => println!("Lines indented"),
+///     Err(e) => eprintln!("Failed: {:?}", e),
+/// }
+/// ```
+///
+/// # Behavior
+/// ```text
+/// Input (lines 0-2):
+/// line 0
+/// line 1
+/// line 2
+///
+/// After indent_range(path, 0, 2):
+///     line 0
+///     line 1
+///     line 2
+/// ```
+pub fn indent_range(
+    file_path: &str,
+    start_line: usize,
+    end_line: usize,
+) -> Result<(), IndentError> {
+    // Validate range
+    if start_line > end_line {
+        return Err(IndentError::InvalidLineRange);
+    }
+
+    // Convert to absolute path
+    let absolute_path = match Path::new(file_path).canonicalize() {
+        Ok(p) => p,
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                return Err(IndentError::FileNotFound);
+            }
+            return Err(IndentError::PathError);
+        }
+    };
+
+    // Get filename for backup naming
+    let filename = match absolute_path.file_name() {
+        Some(name) => name.to_string_lossy().to_string(),
+        None => return Err(IndentError::PathError),
+    };
+
+    // Create backup path in CWD
+    let backup_filename = format!("backup_toggle_comment_{}", filename);
+    let backup_path = PathBuf::from(&backup_filename);
+
+    // Create backup copy
+    if let Err(_) = std::fs::copy(&absolute_path, &backup_path) {
+        return Err(IndentError::IoError(IoOperation::Backup));
+    }
+
+    // Create temp file
+    let temp_filename = format!("temp_indent_range_{}_{}", std::process::id(), filename);
+    let temp_path = PathBuf::from(&temp_filename);
+
+    // Process file and indent range
+    let process_result =
+        process_file_indent_range(&absolute_path, &temp_path, start_line, end_line);
+
+    // Handle result
+    match process_result {
+        Ok(()) => {
+            // Success: replace original
+            if let Err(_) = std::fs::copy(&temp_path, &absolute_path) {
+                let _ = std::fs::remove_file(&temp_path);
+                return Err(IndentError::IoError(IoOperation::Replace));
+            }
+
+            // Clean up temp
+            if let Err(_) = std::fs::remove_file(&temp_path) {
+                #[cfg(debug_assertions)]
+                eprintln!("Warning: Failed to clean up temp file");
+            }
+
+            Ok(())
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&temp_path);
+            Err(e)
+        }
+    }
+}
+
+/// Remove up to 4 spaces from the start of multiple lines (range, inclusive)
+///
+/// # Overview
+/// Removes up to 4 leading spaces from each line in the specified range.
+/// Both start_line and end_line are included in the operation.
+///
+/// # Arguments
+/// * `file_path` - Path to the source file
+/// * `start_line` - Zero-indexed first line to unindent (inclusive)
+/// * `end_line` - Zero-indexed last line to unindent (inclusive)
+///
+/// # Returns
+/// * `Ok(())` - Lines unindented successfully
+/// * `Err(IndentError)` - Specific error code
+///
+/// # Safety
+/// - Uses same backup system as toggle_comment
+/// - Atomic file operations
+/// - No heap allocation during processing
+/// - Preserves line endings (LF/CRLF/none)
+///
+/// # Example
+/// ```no_run
+/// use toggle_comment_module::unindent_range;
+///
+/// // Unindent lines 5 through 10 (inclusive)
+/// match unindent_range("./src/main.rs", 5, 10) {
+///     Ok(()) => println!("Lines unindented"),
+///     Err(e) => eprintln!("Failed: {:?}", e),
+/// }
+/// ```
+///
+/// # Behavior
+/// ```text
+/// Input (lines 0-2):
+///     line 0
+///     line 1
+///     line 2
+///
+/// After unindent_range(path, 0, 2):
+/// line 0
+/// line 1
+/// line 2
+/// ```
+pub fn unindent_range(
+    file_path: &str,
+    start_line: usize,
+    end_line: usize,
+) -> Result<(), IndentError> {
+    // Validate range
+    if start_line > end_line {
+        return Err(IndentError::InvalidLineRange);
+    }
+
+    // Convert to absolute path
+    let absolute_path = match Path::new(file_path).canonicalize() {
+        Ok(p) => p,
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                return Err(IndentError::FileNotFound);
+            }
+            return Err(IndentError::PathError);
+        }
+    };
+
+    // Get filename for backup naming
+    let filename = match absolute_path.file_name() {
+        Some(name) => name.to_string_lossy().to_string(),
+        None => return Err(IndentError::PathError),
+    };
+
+    // Create backup path in CWD
+    let backup_filename = format!("backup_toggle_comment_{}", filename);
+    let backup_path = PathBuf::from(&backup_filename);
+
+    // Create backup copy
+    if let Err(_) = std::fs::copy(&absolute_path, &backup_path) {
+        return Err(IndentError::IoError(IoOperation::Backup));
+    }
+
+    // Create temp file
+    let temp_filename = format!("temp_unindent_range_{}_{}", std::process::id(), filename);
+    let temp_path = PathBuf::from(&temp_filename);
+
+    // Process file and unindent range
+    let process_result =
+        process_file_unindent_range(&absolute_path, &temp_path, start_line, end_line);
+
+    // Handle result
+    match process_result {
+        Ok(()) => {
+            // Success: replace original
+            if let Err(_) = std::fs::copy(&temp_path, &absolute_path) {
+                let _ = std::fs::remove_file(&temp_path);
+                return Err(IndentError::IoError(IoOperation::Replace));
+            }
+
+            // Clean up temp
+            if let Err(_) = std::fs::remove_file(&temp_path) {
+                #[cfg(debug_assertions)]
+                eprintln!("Warning: Failed to clean up temp file");
+            }
+
+            Ok(())
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&temp_path);
+            Err(e)
+        }
+    }
+}
+
+/// Process file line-by-line, adding 4 spaces to lines in range
+///
+/// # Arguments
+/// * `source_path` - Original file to read from
+/// * `dest_path` - Temporary file to write modified content to
+/// * `start_line` - First line to indent (inclusive)
+/// * `end_line` - Last line to indent (inclusive)
+///
+/// # Returns
+/// * `Ok(())` - Processing succeeded, all lines in range indented
+/// * `Err(IndentError)` - Processing failed
+///
+/// # Safety
+/// - Pre-allocated buffers only
+/// - Bounded line length checks
+/// - No dynamic allocation during loop
+fn process_file_indent_range(
+    source_path: &Path,
+    dest_path: &Path,
+    start_line: usize,
+    end_line: usize,
+) -> Result<(), IndentError> {
+    // Open source file
+    let source_file = match File::open(source_path) {
+        Ok(f) => f,
+        Err(_) => return Err(IndentError::IoError(IoOperation::Open)),
+    };
+
+    let mut reader = BufReader::with_capacity(IO_BUFFER_SIZE, source_file);
+
+    // Create destination file
+    let dest_file = match OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(dest_path)
+    {
+        Ok(f) => f,
+        Err(_) => return Err(IndentError::IoError(IoOperation::Create)),
+    };
+
+    let mut writer = BufWriter::with_capacity(IO_BUFFER_SIZE, dest_file);
+
+    let mut line_buffer = Vec::with_capacity(MAX_LINE_LENGTH);
+    let mut current_line: usize = 0;
+    let mut found_end_line = false;
+
+    // Safety limit
+    let line_limit = end_line.saturating_add(1000000);
+
+    // Process file
+    loop {
+        // Safety check
+        if current_line > line_limit {
+            return Err(IndentError::IoError(IoOperation::Read));
+        }
+
+        line_buffer.clear();
+
+        let bytes_read = match reader.read_until(b'\n', &mut line_buffer) {
+            Ok(n) => n,
+            Err(_) => return Err(IndentError::IoError(IoOperation::Read)),
+        };
+
+        if bytes_read == 0 {
+            break;
+        }
+
+        // Safety: check line length
+        if line_buffer.len() > MAX_LINE_LENGTH {
+            return Err(IndentError::LineTooLong {
+                line_number: current_line,
+                length: line_buffer.len(),
+            });
+        }
+
+        // Check if this line is in our target range
+        if current_line >= start_line && current_line <= end_line {
+            // This line is in range - indent it
+            if let Err(e) = indent_single_line(&mut writer, &line_buffer) {
+                return Err(e);
+            }
+
+            // Track if we've seen the end line
+            if current_line == end_line {
+                found_end_line = true;
+            }
+        } else {
+            // Not in range - copy unchanged
+            if let Err(_) = writer.write_all(&line_buffer) {
+                return Err(IndentError::IoError(IoOperation::Write));
+            }
+        }
+
+        current_line += 1;
+    }
+
+    // Flush writer
+    if let Err(_) = writer.flush() {
+        return Err(IndentError::IoError(IoOperation::Flush));
+    }
+
+    // Verify we found the end line
+    if !found_end_line {
+        return Err(IndentError::LineNotFound {
+            requested: end_line,
+            file_lines: current_line,
+        });
+    }
+
+    Ok(())
+}
+
+/// Process file line-by-line, removing up to 4 spaces from lines in range
+///
+/// # Arguments
+/// * `source_path` - Original file to read from
+/// * `dest_path` - Temporary file to write modified content to
+/// * `start_line` - First line to unindent (inclusive)
+/// * `end_line` - Last line to unindent (inclusive)
+///
+/// # Returns
+/// * `Ok(())` - Processing succeeded, all lines in range unindented
+/// * `Err(IndentError)` - Processing failed
+fn process_file_unindent_range(
+    source_path: &Path,
+    dest_path: &Path,
+    start_line: usize,
+    end_line: usize,
+) -> Result<(), IndentError> {
+    // Open source file
+    let source_file = match File::open(source_path) {
+        Ok(f) => f,
+        Err(_) => return Err(IndentError::IoError(IoOperation::Open)),
+    };
+
+    let mut reader = BufReader::with_capacity(IO_BUFFER_SIZE, source_file);
+
+    // Create destination file
+    let dest_file = match OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(dest_path)
+    {
+        Ok(f) => f,
+        Err(_) => return Err(IndentError::IoError(IoOperation::Create)),
+    };
+
+    let mut writer = BufWriter::with_capacity(IO_BUFFER_SIZE, dest_file);
+
+    let mut line_buffer = Vec::with_capacity(MAX_LINE_LENGTH);
+    let mut current_line: usize = 0;
+    let mut found_end_line = false;
+
+    // Safety limit
+    let line_limit = end_line.saturating_add(1000000);
+
+    // Process file
+    loop {
+        // Safety check
+        if current_line > line_limit {
+            return Err(IndentError::IoError(IoOperation::Read));
+        }
+
+        line_buffer.clear();
+
+        let bytes_read = match reader.read_until(b'\n', &mut line_buffer) {
+            Ok(n) => n,
+            Err(_) => return Err(IndentError::IoError(IoOperation::Read)),
+        };
+
+        if bytes_read == 0 {
+            break;
+        }
+
+        // Safety: check line length
+        if line_buffer.len() > MAX_LINE_LENGTH {
+            return Err(IndentError::LineTooLong {
+                line_number: current_line,
+                length: line_buffer.len(),
+            });
+        }
+
+        // Check if this line is in our target range
+        if current_line >= start_line && current_line <= end_line {
+            // This line is in range - unindent it
+            if let Err(e) = unindent_single_line(&mut writer, &line_buffer) {
+                return Err(e);
+            }
+
+            // Track if we've seen the end line
+            if current_line == end_line {
+                found_end_line = true;
+            }
+        } else {
+            // Not in range - copy unchanged
+            if let Err(_) = writer.write_all(&line_buffer) {
+                return Err(IndentError::IoError(IoOperation::Write));
+            }
+        }
+
+        current_line += 1;
+    }
+
+    // Flush writer
+    if let Err(_) = writer.flush() {
+        return Err(IndentError::IoError(IoOperation::Flush));
+    }
+
+    // Verify we found the end line
+    if !found_end_line {
+        return Err(IndentError::LineNotFound {
+            requested: end_line,
+            file_lines: current_line,
+        });
+    }
+
+    Ok(())
+}
+
+// ============================================================================
+// TESTS - Indent/Unindent Range
+// ============================================================================
+
+#[cfg(test)]
+mod indent_range_tests {
+    use super::*;
+
+    /// Helper: create a temporary test file with given content
+    fn create_test_file(filename: &str, content: &str) -> PathBuf {
+        let path = PathBuf::from(filename);
+        let mut file = File::create(&path).expect("Failed to create test file");
+        file.write_all(content.as_bytes())
+            .expect("Failed to write test file");
+        path
+    }
+
+    /// Helper: read file content as string
+    fn read_file_content(path: &Path) -> String {
+        std::fs::read_to_string(path).expect("Failed to read file")
+    }
+
+    /// Helper: cleanup test files
+    fn cleanup_files(paths: &[&Path]) {
+        for path in paths {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    // ========================================
+    // Indent Range Tests
+    // ========================================
+
+    #[test]
+    fn test_indent_range_basic() {
+        let content = "line 0\nline 1\nline 2\n";
+        let test_file = create_test_file("test_indent_range_basic.txt", content);
+
+        let result = indent_range(test_file.to_str().unwrap(), 0, 2);
+        assert!(result.is_ok());
+
+        let new_content = read_file_content(&test_file);
+        assert_eq!(new_content, "    line 0\n    line 1\n    line 2\n");
+
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_indent_range_basic.txt"),
+        ]);
+    }
+
+    #[test]
+    fn test_indent_range_middle() {
+        let content = "line 0\nline 1\nline 2\nline 3\n";
+        let test_file = create_test_file("test_indent_range_middle.txt", content);
+
+        let result = indent_range(test_file.to_str().unwrap(), 1, 2);
+        assert!(result.is_ok());
+
+        let new_content = read_file_content(&test_file);
+        assert_eq!(new_content, "line 0\n    line 1\n    line 2\nline 3\n");
+
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_indent_range_middle.txt"),
+        ]);
+    }
+
+    #[test]
+    fn test_indent_range_single_line() {
+        let content = "line 0\nline 1\nline 2\n";
+        let test_file = create_test_file("test_indent_range_single.txt", content);
+
+        // Range of just one line (start == end)
+        let result = indent_range(test_file.to_str().unwrap(), 1, 1);
+        assert!(result.is_ok());
+
+        let new_content = read_file_content(&test_file);
+        assert_eq!(new_content, "line 0\n    line 1\nline 2\n");
+
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_indent_range_single.txt"),
+        ]);
+    }
+
+    #[test]
+    fn test_indent_range_invalid_range() {
+        let content = "line 0\nline 1\n";
+        let test_file = create_test_file("test_indent_range_invalid.txt", content);
+
+        // start > end
+        let result = indent_range(test_file.to_str().unwrap(), 2, 1);
+        assert!(matches!(result, Err(IndentError::InvalidLineRange)));
+
+        cleanup_files(&[&test_file]);
+    }
+
+    #[test]
+    fn test_indent_range_beyond_eof() {
+        let content = "line 0\nline 1\n";
+        let test_file = create_test_file("test_indent_range_eof.txt", content);
+
+        // end_line beyond file
+        let result = indent_range(test_file.to_str().unwrap(), 0, 10);
+        assert!(matches!(result, Err(IndentError::LineNotFound { .. })));
+
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_indent_range_eof.txt"),
+        ]);
+    }
+
+    #[test]
+    fn test_indent_range_preserves_outside() {
+        let content = "line 0\nline 1\nline 2\nline 3\nline 4\n";
+        let test_file = create_test_file("test_indent_range_preserve.txt", content);
+
+        let result = indent_range(test_file.to_str().unwrap(), 1, 3);
+        assert!(result.is_ok());
+
+        let new_content = read_file_content(&test_file);
+        assert_eq!(
+            new_content,
+            "line 0\n    line 1\n    line 2\n    line 3\nline 4\n"
+        );
+
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_indent_range_preserve.txt"),
+        ]);
+    }
+
+    // ========================================
+    // Unindent Range Tests
+    // ========================================
+
+    #[test]
+    fn test_unindent_range_basic() {
+        let content = "    line 0\n    line 1\n    line 2\n";
+        let test_file = create_test_file("test_unindent_range_basic.txt", content);
+
+        let result = unindent_range(test_file.to_str().unwrap(), 0, 2);
+        assert!(result.is_ok());
+
+        let new_content = read_file_content(&test_file);
+        assert_eq!(new_content, "line 0\nline 1\nline 2\n");
+
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_unindent_range_basic.txt"),
+        ]);
+    }
+
+    #[test]
+    fn test_unindent_range_middle() {
+        let content = "line 0\n    line 1\n    line 2\nline 3\n";
+        let test_file = create_test_file("test_unindent_range_middle.txt", content);
+
+        let result = unindent_range(test_file.to_str().unwrap(), 1, 2);
+        assert!(result.is_ok());
+
+        let new_content = read_file_content(&test_file);
+        assert_eq!(new_content, "line 0\nline 1\nline 2\nline 3\n");
+
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_unindent_range_middle.txt"),
+        ]);
+    }
+
+    #[test]
+    fn test_unindent_range_mixed_indents() {
+        let content = "    line 0\n  line 1\nline 2\n      line 3\n";
+        let test_file = create_test_file("test_unindent_range_mixed.txt", content);
+
+        let result = unindent_range(test_file.to_str().unwrap(), 0, 3);
+        assert!(result.is_ok());
+
+        let new_content = read_file_content(&test_file);
+        // Removes: 4, 2, 0, 4 spaces respectively
+        assert_eq!(new_content, "line 0\nline 1\nline 2\n  line 3\n");
+
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_unindent_range_mixed.txt"),
+        ]);
+    }
+
+    #[test]
+    fn test_unindent_range_single_line() {
+        let content = "line 0\n    line 1\nline 2\n";
+        let test_file = create_test_file("test_unindent_range_single.txt", content);
+
+        // Range of just one line
+        let result = unindent_range(test_file.to_str().unwrap(), 1, 1);
+        assert!(result.is_ok());
+
+        let new_content = read_file_content(&test_file);
+        assert_eq!(new_content, "line 0\nline 1\nline 2\n");
+
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_unindent_range_single.txt"),
+        ]);
+    }
+
+    #[test]
+    fn test_unindent_range_invalid_range() {
+        let content = "line 0\nline 1\n";
+        let test_file = create_test_file("test_unindent_range_invalid.txt", content);
+
+        // start > end
+        let result = unindent_range(test_file.to_str().unwrap(), 2, 1);
+        assert!(matches!(result, Err(IndentError::InvalidLineRange)));
+
+        cleanup_files(&[&test_file]);
+    }
+
+    // ========================================
+    // Round-trip Tests
+    // ========================================
+
+    #[test]
+    fn test_indent_unindent_range_roundtrip() {
+        let original = "line 0\nline 1\nline 2\n";
+        let test_file = create_test_file("test_range_roundtrip.txt", original);
+
+        // Indent range
+        let result1 = indent_range(test_file.to_str().unwrap(), 0, 2);
+        assert!(result1.is_ok());
+
+        let content1 = read_file_content(&test_file);
+        assert_eq!(content1, "    line 0\n    line 1\n    line 2\n");
+
+        // Unindent back
+        let result2 = unindent_range(test_file.to_str().unwrap(), 0, 2);
+        assert!(result2.is_ok());
+
+        let content2 = read_file_content(&test_file);
+        assert_eq!(content2, original);
+
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_range_roundtrip.txt"),
+        ]);
+    }
+
+    #[test]
+    fn test_indent_range_preserves_line_endings() {
+        let content = "line 0\r\nline 1\r\nline 2\r\n";
+        let test_file = create_test_file("test_indent_range_crlf.txt", content);
+
+        let result = indent_range(test_file.to_str().unwrap(), 0, 2);
+        assert!(result.is_ok());
+
+        let new_content = read_file_content(&test_file);
+        assert_eq!(new_content, "    line 0\r\n    line 1\r\n    line 2\r\n");
+
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_indent_range_crlf.txt"),
+        ]);
+    }
+
+    #[test]
+    fn test_unindent_range_no_spaces() {
+        let content = "line 0\nline 1\nline 2\n";
+        let test_file = create_test_file("test_unindent_range_noop.txt", content);
+
+        // Should succeed (no-op)
+        let result = unindent_range(test_file.to_str().unwrap(), 0, 2);
+        assert!(result.is_ok());
+
+        let new_content = read_file_content(&test_file);
+        assert_eq!(new_content, content);
+
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_unindent_range_noop.txt"),
+        ]);
+    }
+}

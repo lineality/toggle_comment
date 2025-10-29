@@ -33,9 +33,9 @@ use std::env;
 use std::process;
 mod toggle_comment_module;
 use toggle_comment_module::{
-    IndentError, ToggleError, indent_line, toggle_basic_singleline_comment, toggle_block_comment,
-    toggle_multiple_basic_comments, toggle_multiple_singline_docstrings,
-    toggle_rust_docstring_singleline_comment, unindent_line,
+    IndentError, ToggleError, indent_line, indent_range, toggle_basic_singleline_comment,
+    toggle_block_comment, toggle_multiple_basic_comments, toggle_multiple_singline_docstrings,
+    toggle_rust_docstring_singleline_comment, unindent_line, unindent_range,
 };
 
 /// Maximum number of lines that can be toggled in batch mode
@@ -54,6 +54,8 @@ fn print_usage() {
     eprintln!("  toggle_comment --list-docstring <file_path> <line1> <line2> ...");
     eprintln!("  toggle_comment --indent <file_path> <line_number>");
     eprintln!("  toggle_comment --unindent <file_path> <line_number>");
+    eprintln!("  toggle_comment --indent-range <file_path> <start_line> <end_line>");
+    eprintln!("  toggle_comment --unindent-range <file_path> <start_line> <end_line>");
     eprintln!();
 
     eprintln!("MODES:");
@@ -82,13 +84,18 @@ fn print_usage() {
     eprintln!();
     eprintln!("  --unindent:");
     eprintln!("    Remove up to 4 spaces from the start of a line");
+    eprintln!("  --indent-range:");
+    eprintln!("    Add 4 spaces to the start of multiple lines (inclusive range)");
+    eprintln!();
+    eprintln!("  --unindent-range:");
+    eprintln!("    Remove up to 4 spaces from multiple lines (inclusive range)");
     eprintln!();
 
     eprintln!("ARGUMENTS:");
     eprintln!("  file_path    - Path to source code file");
     eprintln!("  line_number  - Line number to toggle (zero-indexed)");
-    eprintln!("  start_line   - First line of block (zero-indexed)");
-    eprintln!("  end_line     - Last line of block (zero-indexed)");
+    eprintln!("  start_line   - First line of range/block (zero-indexed, inclusive)");
+    eprintln!("  end_line     - Last line of range/block (zero-indexed, inclusive)");
     eprintln!();
 
     eprintln!("EXAMPLES:");
@@ -182,26 +189,6 @@ fn parse_line_list(args: &[String]) -> Result<(usize, [usize; MAX_BATCH_LINES]),
     Ok((count, line_array))
 }
 
-// /// Convert ToggleError to exit code
-// ///
-// /// # Arguments
-// /// * `error` - The error to convert
-// ///
-// /// # Returns
-// /// * Exit code (2-8)
-// fn error_to_exit_code(error: ToggleError) -> i32 {
-//     match error {
-//         ToggleError::FileNotFound => 2,
-//         ToggleError::NoExtension => 3,
-//         ToggleError::UnsupportedExtension => 4,
-//         ToggleError::LineNotFound { .. } => 5,
-//         ToggleError::IoError(_) => 6,
-//         ToggleError::PathError => 7,
-//         ToggleError::LineTooLong { .. } => 8,
-//         ToggleError::InconsistentBlockMarkers => 9,
-//         ToggleError::InvalidLineRange => 10,
-//     }
-// }
 /// Convert ToggleError to exit code
 ///
 /// # Arguments
@@ -314,27 +301,36 @@ fn execute_block_toggle(file_path: &str, start_line: usize, end_line: usize) -> 
     }
 }
 
-// /// Execute batch toggle - basic comments (NOT IMPLEMENTED YET)
-// fn execute_batch_toggle_standard(
-//     file_path: &str,
-//     _count: usize,
-//     _lines: &[usize; MAX_BATCH_LINES],
-// ) -> i32 {
-//     eprintln!("Error: Batch toggle not yet implemented");
-//     eprintln!("File: {}", file_path);
-//     1
-// }
+/// Execute indent on a range of lines
+fn execute_indent_range(file_path: &str, start_line: usize, end_line: usize) -> i32 {
+    match indent_range(file_path, start_line, end_line) {
+        Ok(()) => {
+            println!("Successfully indented lines {} to {}", start_line, end_line);
+            0
+        }
+        Err(e) => {
+            eprintln!("Error indenting range {}: {}", file_path, e);
+            indent_error_to_exit_code(e)
+        }
+    }
+}
 
-// /// Execute batch toggle - docstrings (NOT IMPLEMENTED YET)
-// fn execute_batch_toggle_docstring(
-//     file_path: &str,
-//     _count: usize,
-//     _lines: &[usize; MAX_BATCH_LINES],
-// ) -> i32 {
-//     eprintln!("Error: Batch docstring toggle not yet implemented");
-//     eprintln!("File: {}", file_path);
-//     1
-// }
+/// Execute unindent on a range of lines
+fn execute_unindent_range(file_path: &str, start_line: usize, end_line: usize) -> i32 {
+    match unindent_range(file_path, start_line, end_line) {
+        Ok(()) => {
+            println!(
+                "Successfully unindented lines {} to {}",
+                start_line, end_line
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!("Error unindenting range {}: {}", file_path, e);
+            indent_error_to_exit_code(e)
+        }
+    }
+}
 
 /// Execute batch toggle - basic comments
 fn execute_batch_toggle_standard(
@@ -537,39 +533,75 @@ fn main() {
 
                 execute_unindent(file_path, line_number)
             }
-            // "--indent-range" => {
-            //     // Expect: --block <file> <start_line> <end_line>
-            //     if args.len() != 5 {
-            //         eprintln!("Error: --block requires <file_path> <start_line> <end_line>");
-            //         eprintln!();
-            //         print_usage();
-            //         process::exit(1);
-            //     }
+            "--indent-range" => {
+                // Expect: --indent-range <file> <start_line> <end_line>
+                if args.len() != 5 {
+                    eprintln!("Error: --indent-range requires <file_path> <start_line> <end_line>");
+                    eprintln!();
+                    print_usage();
+                    process::exit(1);
+                }
 
-            //     let file_path = &args[2];
-            //     let start_line = match parse_line_number(&args[3], "start_line") {
-            //         Ok(n) => n,
-            //         Err(_) => {
-            //             print_usage();
-            //             process::exit(1);
-            //         }
-            //     };
-            //     let end_line = match parse_line_number(&args[4], "end_line") {
-            //         Ok(n) => n,
-            //         Err(_) => {
-            //             print_usage();
-            //             process::exit(1);
-            //         }
-            //     };
+                let file_path = &args[2];
+                let start_line = match parse_line_number(&args[3], "start_line") {
+                    Ok(n) => n,
+                    Err(_) => {
+                        print_usage();
+                        process::exit(1);
+                    }
+                };
+                let end_line = match parse_line_number(&args[4], "end_line") {
+                    Ok(n) => n,
+                    Err(_) => {
+                        print_usage();
+                        process::exit(1);
+                    }
+                };
 
-            //     // Validate line order
-            //     if start_line >= end_line {
-            //         eprintln!("Error: start_line must be less than end_line");
-            //         process::exit(1);
-            //     }
+                // Validate line order
+                if start_line > end_line {
+                    eprintln!("Error: start_line must be less than or equal to end_line");
+                    process::exit(1);
+                }
 
-            //     execute_block_toggle(file_path, start_line, end_line)
-            // }
+                execute_indent_range(file_path, start_line, end_line)
+            }
+
+            "--unindent-range" => {
+                // Expect: --unindent-range <file> <start_line> <end_line>
+                if args.len() != 5 {
+                    eprintln!(
+                        "Error: --unindent-range requires <file_path> <start_line> <end_line>"
+                    );
+                    eprintln!();
+                    print_usage();
+                    process::exit(1);
+                }
+
+                let file_path = &args[2];
+                let start_line = match parse_line_number(&args[3], "start_line") {
+                    Ok(n) => n,
+                    Err(_) => {
+                        print_usage();
+                        process::exit(1);
+                    }
+                };
+                let end_line = match parse_line_number(&args[4], "end_line") {
+                    Ok(n) => n,
+                    Err(_) => {
+                        print_usage();
+                        process::exit(1);
+                    }
+                };
+
+                // Validate line order
+                if start_line > end_line {
+                    eprintln!("Error: start_line must be less than or equal to end_line");
+                    process::exit(1);
+                }
+
+                execute_unindent_range(file_path, start_line, end_line)
+            }
             _ => {
                 eprintln!("Error: Unknown flag: {}", flag);
                 eprintln!();
