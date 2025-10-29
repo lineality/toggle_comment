@@ -140,7 +140,6 @@ fn main() {
 
 /*
 
-
 # Rust rules:
 -Always best practice.
 -Always extensive doc strings.
@@ -243,11 +242,20 @@ This is central to the question about testing vs. a pedantic ban on conditional 
 Just like with the pedantic "a loops being bounded" rule, there is a fundamental exception: always-on loops must be the opposite.
 With conditional compilations: code NEVER to EVER be in production-builds MUST be "conditionally" excluded. This is not an OS condition or a hardware condition. This is an 'unsafe-testing or not' condition.
 
+Error messages and error outcomes in 'production' 'release' (real-use, not debug/testing) must not ever contain any information that could be a security vulnerability or attack surface. Failing to remove debugging inspection is a major category of security and hygiene problems.
 
-6. ? Is this about ownership of variables?
-- not sure how this translates into Rust's own-borrow rules...
+Security: Error messages in production must NOT contain:
+- File paths (can reveal system structure)
+- File contents
+- environment variables
+- data
+- Internal implementation details
 
-7. manage return values:
+Production output following an error must be managed and defined, not not open to whatever some api or OS call wants to dump out.
+
+6. Manage ownership and borrowing
+
+7. Manage return values:
 - use null-void return values
 - check non-void-null returns
 
@@ -383,15 +391,6 @@ enum CommentFlag {
 
     /// Hash/pound comments (Python, Shell, TOML, etc.)
     Hash,
-
-    /// Python Type Doc Block
-    QuoteBlock,
-
-    /// Rust Type Doc Block Start
-    SlashBlockStart,
-
-    /// Rust Type Doc Block End
-    SlashBlockEnd,
 }
 
 impl CommentFlag {
@@ -401,9 +400,6 @@ impl CommentFlag {
             CommentFlag::TripppleSlash => b"///",
             CommentFlag::DoubleSlash => b"//",
             CommentFlag::Hash => b"#",
-            CommentFlag::QuoteBlock => b"\"\"\"", // """
-            CommentFlag::SlashBlockStart => b"/*",
-            CommentFlag::SlashBlockEnd => b"*/",
         }
     }
 
@@ -413,9 +409,6 @@ impl CommentFlag {
             CommentFlag::TripppleSlash => "///",
             CommentFlag::DoubleSlash => "//",
             CommentFlag::Hash => "#",
-            CommentFlag::QuoteBlock => "\"\"\"", // """
-            CommentFlag::SlashBlockStart => "/*",
-            CommentFlag::SlashBlockEnd => "*/",
         }
     }
 }
@@ -2055,6 +2048,237 @@ mod toggle_comment_tests {
         cleanup_files(&[
             &test_file,
             &PathBuf::from("backup_toggle_comment_test_preserve.rs"),
+        ]);
+    }
+
+    #[test]
+    fn test_toggle_rust_docstring_add() {
+        let test_file = create_test_file("test_docstring1.rs", "/// Some docs\n");
+        let result = toggle_rust_docstring_singleline_comment(test_file.to_str().unwrap(), 0);
+        assert!(result.is_ok());
+        let content = read_file_content(&test_file);
+        assert_eq!(content, "Some docs\n"); // Should remove ///
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_docstring.rs"),
+        ]);
+    }
+
+    #[test]
+    fn test_toggle_rust_docstring_remove() {
+        let test_file = create_test_file("test_docstring2.rs", "Some docs\n");
+        let result = toggle_rust_docstring_singleline_comment(test_file.to_str().unwrap(), 0);
+        assert!(result.is_ok());
+        let content = read_file_content(&test_file);
+        assert_eq!(content, "/// Some docs\n"); // Should add ///
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_docstring.rs"),
+        ]);
+    }
+
+    #[test]
+    fn test_toggle_comment_no_newline_at_eof() {
+        // Last line without newline
+        let test_file = create_test_file("test_no_newline.rs", "fn main() {}");
+        let result = toggle_basic_singleline_comment(test_file.to_str().unwrap(), 0);
+        assert!(result.is_ok());
+        let content = read_file_content(&test_file);
+        assert_eq!(content, "// fn main() {}"); // No newline added
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_no_newline.rs"),
+        ]);
+    }
+
+    #[test]
+    fn test_toggle_comment_crlf_line_ending() {
+        // Windows-style line ending
+        let test_file = create_test_file("test_crlf.rs", "fn main() {}\r\n");
+        let result = toggle_basic_singleline_comment(test_file.to_str().unwrap(), 0);
+        assert!(result.is_ok());
+        let content = read_file_content(&test_file);
+        assert_eq!(content, "// fn main() {}\r\n"); // Preserve CRLF
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_crlf.rs"),
+        ]);
+    }
+
+    #[test]
+    fn test_toggle_comment_with_tabs() {
+        let test_file = create_test_file("test_tabs.rs", "\t\tfn main() {}\n");
+        let result = toggle_basic_singleline_comment(test_file.to_str().unwrap(), 0);
+        assert!(result.is_ok());
+        let content = read_file_content(&test_file);
+        assert_eq!(content, "// \t\tfn main() {}\n");
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_tabs.rs"),
+        ]);
+    }
+
+    #[test]
+    fn test_toggle_comment_only_whitespace_line() {
+        // Line with only spaces/tabs
+        let test_file = create_test_file("test_whitespace.rs", "    \n");
+        let result = toggle_basic_singleline_comment(test_file.to_str().unwrap(), 0);
+        assert!(result.is_ok());
+        let content = read_file_content(&test_file);
+        assert_eq!(content, "//     \n"); // Comment even whitespace-only lines
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_whitespace.rs"),
+        ]);
+    }
+
+    #[test]
+    fn test_toggle_comment_empty_line() {
+        let test_file = create_test_file("test_empty.rs", "\n");
+        let result = toggle_basic_singleline_comment(test_file.to_str().unwrap(), 0);
+        assert!(result.is_ok());
+        let content = read_file_content(&test_file);
+        assert_eq!(content, "// \n");
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_empty.rs"),
+        ]);
+    }
+
+    #[test]
+    fn test_toggle_comment_idempotent() {
+        // Toggle on, then off - should return to original
+        let original = "fn main() {}\n";
+        let test_file = create_test_file("test_idempotent.rs", original);
+
+        let result1 = toggle_basic_singleline_comment(test_file.to_str().unwrap(), 0);
+        assert!(result1.is_ok());
+
+        let result2 = toggle_basic_singleline_comment(test_file.to_str().unwrap(), 0);
+        assert!(result2.is_ok());
+
+        let content = read_file_content(&test_file);
+        assert_eq!(content, original);
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_idempotent.rs"),
+        ]);
+    }
+    #[test]
+    fn test_toggle_comment_double_comment() {
+        // Line that's "// // code"
+        let test_file = create_test_file("test_double.rs", "// // code\n");
+        let result = toggle_basic_singleline_comment(test_file.to_str().unwrap(), 0);
+        assert!(result.is_ok());
+        let content = read_file_content(&test_file);
+        // Should remove outer comment only
+        assert_eq!(content, "// code\n");
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_double.rs"),
+        ]);
+    }
+
+    #[test]
+    fn test_toggle_comment_just_flag_and_space() {
+        // Line with only "// "
+        let test_file = create_test_file("test_just_flag.rs", "// \n");
+        let result = toggle_basic_singleline_comment(test_file.to_str().unwrap(), 0);
+        assert!(result.is_ok());
+        let content = read_file_content(&test_file);
+        assert_eq!(content, "\n"); // Just whitespace removed
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_just_flag.rs"),
+        ]);
+    }
+    #[test]
+    fn test_toggle_comment_last_line() {
+        let content = "line 0\nline 1\nline 2\n";
+        let test_file = create_test_file("test_last_line.rs", content);
+        let result = toggle_basic_singleline_comment(test_file.to_str().unwrap(), 2);
+        assert!(result.is_ok());
+        let new_content = read_file_content(&test_file);
+        assert_eq!(new_content, "line 0\nline 1\n// line 2\n");
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_last_line.rs"),
+        ]);
+    }
+
+    #[test]
+    fn test_toggle_comment_single_line_file() {
+        let test_file = create_test_file("test_single.rs", "code\n");
+        let result = toggle_basic_singleline_comment(test_file.to_str().unwrap(), 0);
+        assert!(result.is_ok());
+        let content = read_file_content(&test_file);
+        assert_eq!(content, "// code\n");
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_single.rs"),
+        ]);
+    }
+
+    #[test]
+    fn test_file_not_found() {
+        let result = toggle_basic_singleline_comment("/nonexistent/path/file.rs", 0);
+        assert!(matches!(result, Err(ToggleError::FileNotFound)));
+    }
+    #[test]
+    fn test_extension_case_insensitive() {
+        let test_file = create_test_file("test_upper.RS", "code\n");
+        let result = toggle_basic_singleline_comment(test_file.to_str().unwrap(), 0);
+        assert!(result.is_ok());
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_upper.RS"),
+        ]);
+    }
+    #[test]
+    fn test_batch_empty_array() {
+        let test_file = create_test_file("test_batch_empty.rs", "line 0\n");
+        let lines: [usize; 0] = [];
+        let result = toggle_multiple_basic_comments(test_file.to_str().unwrap(), &lines);
+        assert!(result.is_ok()); // Should succeed (no-op)
+        cleanup_files(&[&test_file]);
+    }
+
+    #[test]
+    fn test_batch_out_of_range() {
+        let test_file = create_test_file("test_batch_oob.rs", "line 0\n");
+        let lines = [100]; // Way beyond file
+        let result = toggle_multiple_basic_comments(test_file.to_str().unwrap(), &lines);
+        assert!(matches!(result, Err(ToggleError::LineNotFound { .. })));
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_batch_test_batch_oob.rs"),
+        ]);
+    }
+
+    #[test]
+    fn test_batch_exceeds_max() {
+        let test_file = create_test_file("test_batch_max.rs", "line\n".repeat(150).as_str());
+        let lines: Vec<usize> = (0..130).collect(); // > MAX_BATCH_LINES
+        let result = toggle_multiple_basic_comments(test_file.to_str().unwrap(), &lines);
+        assert!(result.is_err()); // Should reject
+        cleanup_files(&[&test_file]);
+    }
+    #[test]
+    fn test_determine_block_markers() {
+        assert!(determine_block_markers("rs").is_some());
+        assert!(determine_block_markers("py").is_some());
+        assert!(determine_block_markers("sh").is_none()); // No block comments
+    }
+    #[test]
+    fn test_toggle_preserves_trailing_whitespace() {
+        let test_file = create_test_file("test_trailing.rs", "code   \n");
+        let result = toggle_basic_singleline_comment(test_file.to_str().unwrap(), 0);
+        assert!(result.is_ok());
+        let content = read_file_content(&test_file);
+        assert_eq!(content, "// code   \n"); // Trailing spaces preserved
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_comment_test_trailing.rs"),
         ]);
     }
 }
