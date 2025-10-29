@@ -43,81 +43,9 @@ so the file backup is not redundant for a 'set' of operations?
 state-less no-heap is a challenge here but a good one.
 what is realistic? what is practical?
 Good-enough and maintainable is infinitly than a broken moonshot.
-a list of 512 rows if memory-slim might be fine.
+a list of 64 rows if memory-slim might be fine.
 
 
-3. Is there a clean way to take in two line numbers
-   and add comment-block lines before the first and after the 2nd?
-
-   e.g.
-   if those lines are not exact match: (not a pattern search: only exact match)
-   /*\n
-   */\n
-   Then not-detected: toggle on
-
-   if exact match, toggle-off
-
-   language-extention based route is the same as before:
-   .rs uses /**/, python uses """ """, etc.
-
-   ok! great start. toggle-off is working
-
-   but I two issues:
-   1. I may need to re-think my logic for toggle on
-   2. this is over-writing a line (removing a whole line of code)... which is VERY BAD, that should NOT be happening
-
-   note: toggle-off works fine.
-
-   Toggle on will be given two lines:
-   1. check if they are both already 'off' (this is probably working fine).
-   2.  let's look at an example
-
-   line, code
-   ```
-   5  # Comment alpha
-   6  # Comment b
-   7  # Comment 13
-   ```
-
-   we run (assuming these are zero-index lines)
-   ```
-   cargo run -- --block hello_world.py 5 7
-   ```
-
-   1. check if they are both currently 'on' or 'off'
-   (assuming found to be 'off')
-   2. start toggle-on action: starting at end
-   3. add '\n"""\n' to the beginning of line 8 (update, NOT line 7!)
-   4. add '\n"""\n' to the beginning of line 5
-
-
-   can you see how the current code is not doing this?
-   (how on earth is toggle-on deleting a line of code???)
-   there is no 'remove' action in toggle-on mode...
-
-   being an exact match, not forward pattern, should make it overall much simpler (if more steps)
-
-
-4. Avoid heap for error messages and for all things.
-   if this is big hastle (why do error-messages need heap???
-   we can't set a terse error message???)
-   then whatever, forget it,
-   but lazy abuse of heap for recreational lazyiness
-   turns important code into liablity toxic waste.
-   Is heap used because that is THE best way
-   the most secure, the most efficient?
-   Or is heap used because "it's future dev's problem, let's party"
-   Can we use  heap in debug mode only?
-   The lack of clarity on this is not acceptable.
-   Production software must not be a shrug punt.
-   Is debug information being included in production builds?
-   That is NOT supposed to happen.
-
-
-
-Note: yes, if people have strange exotic code, this will not
-try to work with that.
-e.g.
 ```
 ////////////
 ```
@@ -1192,21 +1120,420 @@ mod block_comment_tests {
     }
 }
 
-// // TODO
-// state-less no-heap is a challenge here but a good one.
-// what is realistic? what is practical?
-// Good-enough and maintainable is infinitly than a broken moonshot.
-// a list of 256 rows if memory-slim might be fine.
-// if the use has to do batches, whatever.
-// error handling, if the user puts in more than 256 items:
-// do nothing, or print "too many"
-// // not 'stateful' just iterate through
-// pub fn set_toggle_basic_single_lines_comment(
-//     file_path: &str,
-//     list_row_lines_zeroindex: N vec<useize>, (pseudo syntax)
-// ) -> Result<(), ToggleError> {
-//     Ok(())
-// }
+// ================
+// List Batch Toggle
+// =================
+
+/// Maximum number of lines in batch operations
+/// 128 lines = 1KB of stack space (8 bytes per usize on 64-bit)
+const MAX_BATCH_LINES: usize = 128;
+
+/// Toggle comments on multiple lines in a single operation
+///
+/// # Overview
+/// Process multiple lines with one backup and one file pass.
+/// More efficient than calling toggle function N times.
+///
+/// # Arguments
+/// * `file_path` - Path to source file
+/// * `line_numbers` - Slice of line numbers to toggle (zero-indexed)
+/// * `comment_flag` - Which comment type to use
+///
+/// # Returns
+/// * `Ok(())` - All lines toggled successfully
+/// * `Err(ToggleError)` - Processing failed
+///
+/// # Safety
+/// - Bounded to MAX_BATCH_LINES (128 lines)
+/// - Single backup, single file pass
+/// - Stack-only array (no heap)
+/// - Sorted for O(1) lookup per line
+///
+/// # Example
+/// ```no_run
+/// let lines = [5, 10, 15, 20];
+/// toggle_multiple_lines("./src/main.rs", &lines, CommentFlag::DoubleSlash)?;
+/// ```
+fn toggle_multiple_lines(
+    file_path: &str,
+    line_numbers: &[usize],
+    comment_flag: CommentFlag,
+) -> Result<(), ToggleError> {
+    // Validate input
+    if line_numbers.is_empty() {
+        return Ok(()); // Nothing to do
+    }
+
+    if line_numbers.len() > MAX_BATCH_LINES {
+        // Too many lines - could return error or just process first N
+        return Err(ToggleError::IoError(IoOperation::Read)); // Reuse error for now
+    }
+
+    // Convert to absolute path
+    let absolute_path = match Path::new(file_path).canonicalize() {
+        Ok(p) => p,
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                return Err(ToggleError::FileNotFound);
+            }
+            return Err(ToggleError::PathError);
+        }
+    };
+
+    // Get filename for backup
+    let filename = match absolute_path.file_name() {
+        Some(name) => name.to_string_lossy().to_string(),
+        None => return Err(ToggleError::PathError),
+    };
+
+    // Copy line numbers to fixed array and sort
+    let mut sorted_lines: [usize; MAX_BATCH_LINES] = [0; MAX_BATCH_LINES];
+    let count = line_numbers.len();
+
+    // Copy input to our array
+    for i in 0..count {
+        sorted_lines[i] = line_numbers[i];
+    }
+
+    // Sort the array (only the valid portion)
+    // This enables O(1) lookup during file processing
+    sorted_lines[..count].sort_unstable();
+
+    // Remove duplicates by compacting array
+    let mut unique_count = 0;
+    if count > 0 {
+        sorted_lines[0] = sorted_lines[0]; // First element stays
+        unique_count = 1;
+
+        for i in 1..count {
+            if sorted_lines[i] != sorted_lines[unique_count - 1] {
+                sorted_lines[unique_count] = sorted_lines[i];
+                unique_count += 1;
+            }
+        }
+    }
+
+    // If no valid lines after dedup, nothing to do
+    if unique_count == 0 {
+        return Ok(());
+    }
+
+    // Create backup path in CWD
+    let backup_filename = format!("backup_toggle_comment_{}", filename);
+    let backup_path = PathBuf::from(&backup_filename);
+
+    // Create backup copy
+    if let Err(_) = std::fs::copy(&absolute_path, &backup_path) {
+        return Err(ToggleError::IoError(IoOperation::Backup));
+    }
+
+    // Create temp file
+    let temp_filename = format!("temp_toggle_batch_{}_{}", std::process::id(), filename);
+    let temp_path = PathBuf::from(&temp_filename);
+
+    // Process file with batch toggle
+    let process_result = process_batch_toggle(
+        &absolute_path,
+        &temp_path,
+        &sorted_lines[..unique_count],
+        comment_flag,
+    );
+
+    // Handle result
+    match process_result {
+        Ok(()) => {
+            // Success: replace original
+            if let Err(_) = std::fs::copy(&temp_path, &absolute_path) {
+                let _ = std::fs::remove_file(&temp_path);
+                return Err(ToggleError::IoError(IoOperation::Replace));
+            }
+
+            // Clean up temp
+            if let Err(_) = std::fs::remove_file(&temp_path) {
+                #[cfg(debug_assertions)]
+                eprintln!("Warning: Failed to clean up temp file");
+            }
+
+            Ok(())
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&temp_path);
+            Err(e)
+        }
+    }
+}
+
+/// Process file toggling comments on multiple lines
+///
+/// # Arguments
+/// * `source_path` - Original file
+/// * `dest_path` - Temporary output file
+/// * `target_lines` - SORTED array of line numbers to toggle
+/// * `flag` - Comment flag to use
+///
+/// # Algorithm
+/// Uses sorted array for O(1) lookup:
+/// - Keep index into sorted array
+/// - For each line, check if current_line == sorted_array[index]
+/// - If match: toggle and increment index
+/// - If no match: copy unchanged
+///
+/// # Returns
+/// * `Ok(())` - Processing succeeded
+/// * `Err(ToggleError)` - Processing failed
+fn process_batch_toggle(
+    source_path: &Path,
+    dest_path: &Path,
+    target_lines: &[usize], // Pre-sorted, no duplicates
+    flag: CommentFlag,
+) -> Result<(), ToggleError> {
+    // Open source file
+    let source_file = match File::open(source_path) {
+        Ok(f) => f,
+        Err(_) => return Err(ToggleError::IoError(IoOperation::Open)),
+    };
+
+    let mut reader = BufReader::with_capacity(IO_BUFFER_SIZE, source_file);
+
+    // Create destination file
+    let dest_file = match OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(dest_path)
+    {
+        Ok(f) => f,
+        Err(_) => return Err(ToggleError::IoError(IoOperation::Create)),
+    };
+
+    let mut writer = BufWriter::with_capacity(IO_BUFFER_SIZE, dest_file);
+
+    let mut line_buffer = Vec::with_capacity(MAX_LINE_LENGTH);
+    let mut current_line: usize = 0;
+    let mut target_index: usize = 0; // Index into sorted target_lines array
+
+    // Get last target line for safety limit
+    let max_target_line = target_lines[target_lines.len() - 1];
+    let line_limit = max_target_line.saturating_add(1000000);
+
+    // Track how many lines we actually toggled
+    let mut toggled_count: usize = 0;
+
+    // Process file line by line
+    loop {
+        // Safety check
+        if current_line > line_limit {
+            return Err(ToggleError::IoError(IoOperation::Read));
+        }
+
+        line_buffer.clear();
+
+        let bytes_read = match reader.read_until(b'\n', &mut line_buffer) {
+            Ok(n) => n,
+            Err(_) => return Err(ToggleError::IoError(IoOperation::Read)),
+        };
+
+        // End of file
+        if bytes_read == 0 {
+            break;
+        }
+
+        // Safety: check line length
+        if line_buffer.len() > MAX_LINE_LENGTH {
+            return Err(ToggleError::LineTooLong {
+                line_number: current_line,
+                length: line_buffer.len(),
+            });
+        }
+
+        // Check if this is a target line (O(1) because array is sorted)
+        if target_index < target_lines.len() && current_line == target_lines[target_index] {
+            // This is a target line - toggle it
+            if let Err(e) = toggle_line(&mut writer, &line_buffer, flag) {
+                return Err(e);
+            }
+
+            // Move to next target
+            target_index += 1;
+            toggled_count += 1;
+        } else {
+            // Not a target line - copy unchanged
+            if let Err(_) = writer.write_all(&line_buffer) {
+                return Err(ToggleError::IoError(IoOperation::Write));
+            }
+        }
+
+        current_line += 1;
+    }
+
+    // Flush writer
+    if let Err(_) = writer.flush() {
+        return Err(ToggleError::IoError(IoOperation::Flush));
+    }
+
+    // Verify we found all target lines
+    if toggled_count < target_lines.len() {
+        // Some target lines were beyond EOF
+        let first_missing = target_lines[toggled_count];
+        return Err(ToggleError::LineNotFound {
+            requested: first_missing,
+            file_lines: current_line,
+        });
+    }
+
+    Ok(())
+}
+
+/// Toggle basic comments on multiple lines (extension-based)
+///
+/// # Arguments
+/// * `file_path` - Path to source file
+/// * `line_numbers` - Slice of line numbers to toggle
+///
+/// # Returns
+/// * `Ok(())` - All lines toggled successfully
+/// * `Err(ToggleError)` - Processing failed
+///
+/// # Example
+/// ```no_run
+/// let lines = [5, 10, 15];
+/// toggle_multiple_basic_comments("./src/main.rs", &lines)?;
+/// ```
+pub fn toggle_multiple_basic_comments(
+    file_path: &str,
+    line_numbers: &[usize],
+) -> Result<(), ToggleError> {
+    // Determine comment flag from extension
+    let path = Path::new(file_path);
+    let extension = match path.extension() {
+        Some(ext) => ext.to_string_lossy().to_string(),
+        None => return Err(ToggleError::NoExtension),
+    };
+
+    let comment_flag = match determine_comment_flag(&extension) {
+        Some(flag) => flag,
+        None => return Err(ToggleError::UnsupportedExtension),
+    };
+
+    toggle_multiple_lines(file_path, line_numbers, comment_flag)
+}
+
+/// Toggle Rust docstrings on multiple lines
+///
+/// # Arguments
+/// * `file_path` - Path to source file
+/// * `line_numbers` - Slice of line numbers to toggle
+///
+/// # Returns
+/// * `Ok(())` - All docstrings toggled successfully
+/// * `Err(ToggleError)` - Processing failed
+///
+/// # Example
+/// ```no_run
+/// let lines = [10, 20, 30];
+/// toggle_multiple_singline_docstrings("./src/lib.rs", &lines)?;
+/// ```
+pub fn toggle_multiple_singline_docstrings(
+    file_path: &str,
+    line_numbers_list: &[usize],
+) -> Result<(), ToggleError> {
+    toggle_multiple_lines(file_path, line_numbers_list, CommentFlag::TripppleSlash)
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+
+    /// Helper: create a temporary test file with given content
+    fn create_test_file(filename: &str, content: &str) -> PathBuf {
+        let path = PathBuf::from(filename);
+        let mut file = File::create(&path).expect("Failed to create test file");
+        file.write_all(content.as_bytes())
+            .expect("Failed to write test file");
+        path
+    }
+
+    /// Helper: read file content as string
+    fn read_file_content(path: &Path) -> String {
+        std::fs::read_to_string(path).expect("Failed to read file")
+    }
+
+    /// Helper: cleanup test files
+    fn cleanup_files(paths: &[&Path]) {
+        for path in paths {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    #[test]
+    fn test_batch_toggle_multiple_lines() {
+        let content = "line 0\nline 1\nline 2\nline 3\nline 4\n";
+        let test_file = create_test_file("test_batch.rs", content);
+
+        let lines = [1, 3]; // Toggle lines 1 and 3
+        let result = toggle_multiple_basic_comments(test_file.to_str().unwrap(), &lines);
+
+        #[cfg(test)]
+        assert!(result.is_ok());
+
+        let new_content = read_file_content(&test_file);
+        let expected = "line 0\n// line 1\nline 2\n// line 3\nline 4\n";
+
+        #[cfg(test)]
+        assert_eq!(new_content, expected);
+
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_batch_test_batch.rs"),
+        ]);
+    }
+
+    #[test]
+    fn test_batch_toggle_unsorted_input() {
+        let content = "line 0\nline 1\nline 2\nline 3\n";
+        let test_file = create_test_file("test_batch_unsort.rs", content);
+
+        let lines = [3, 1, 2]; // Unsorted input
+        let result = toggle_multiple_basic_comments(test_file.to_str().unwrap(), &lines);
+
+        #[cfg(test)]
+        assert!(result.is_ok());
+
+        let new_content = read_file_content(&test_file);
+        let expected = "line 0\n// line 1\n// line 2\n// line 3\n";
+
+        #[cfg(test)]
+        assert_eq!(new_content, expected);
+
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_batch_test_batch_unsort.rs"),
+        ]);
+    }
+
+    #[test]
+    fn test_batch_toggle_duplicates() {
+        let content = "line 0\nline 1\nline 2\n";
+        let test_file = create_test_file("test_batch_dup.rs", content);
+
+        let lines = [1, 1, 1]; // Duplicates
+        let result = toggle_multiple_basic_comments(test_file.to_str().unwrap(), &lines);
+
+        #[cfg(test)]
+        assert!(result.is_ok());
+
+        let new_content = read_file_content(&test_file);
+        let expected = "line 0\n// line 1\nline 2\n";
+
+        #[cfg(test)]
+        assert_eq!(new_content, expected);
+
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_batch_test_batch_dup.rs"),
+        ]);
+    }
+}
 
 /// Toggle comment on a specific line in a source code file
 ///

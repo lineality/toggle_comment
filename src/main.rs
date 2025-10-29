@@ -19,12 +19,12 @@
 //!
 //! ## Batch toggle - basic comments
 //! ```text
-//! toggle_comment --toggle-list-standard <file_path> <line1> <line2> ... <lineN>
+//! toggle_comment --list-basic <file_path> <line1> <line2> ... <lineN>
 //! ```
 //!
 //! ## Batch toggle - rust docstrings
 //! ```text
-//! toggle_comment --toggle-list-rust-doc-string <file_path> <line1> <line2> ... <lineN>
+//! toggle_comment --list-docstring <file_path> <line1> <line2> ... <lineN>
 //! ```
 
 use std::env;
@@ -32,6 +32,7 @@ use std::process;
 mod toggle_comment_module;
 use toggle_comment_module::{
     ToggleError, toggle_basic_singleline_comment, toggle_block_comment,
+    toggle_multiple_basic_comments, toggle_multiple_singline_docstrings,
     toggle_rust_docstring_singleline_comment,
 };
 
@@ -47,8 +48,8 @@ fn print_usage() {
     eprintln!("  toggle_comment <file_path> <line_number>");
     eprintln!("  toggle_comment --rust-doc-string <file_path> <line_number>");
     eprintln!("  toggle_comment --block <file_path> <start_line> <end_line>");
-    eprintln!("  toggle_comment --toggle-list-standard <file_path> <line1> <line2> ...");
-    eprintln!("  toggle_comment --toggle-list-rust-doc-string <file_path> <line1> <line2> ...");
+    eprintln!("  toggle_comment --list-basic <file_path> <line1> <line2> ...");
+    eprintln!("  toggle_comment --list-docstring <file_path> <line1> <line2> ...");
     eprintln!();
     eprintln!("MODES:");
     eprintln!("  Basic mode:");
@@ -63,11 +64,11 @@ fn print_usage() {
     eprintln!("    Inserts /* before start_line and */ after end_line (or removes them)");
     eprintln!("    For Python: uses \"\"\" instead");
     eprintln!();
-    eprintln!("  --toggle-list-standard:");
+    eprintln!("  --list-basic:");
     eprintln!("    Toggle basic comments on multiple lines in one operation");
     eprintln!("    Maximum {} lines per batch", MAX_BATCH_LINES);
     eprintln!();
-    eprintln!("  --toggle-list-rust-doc-string:");
+    eprintln!("  --list-docstring:");
     eprintln!("    Toggle /// comments on multiple lines in one operation");
     eprintln!("    Maximum {} lines per batch", MAX_BATCH_LINES);
     eprintln!();
@@ -78,10 +79,12 @@ fn print_usage() {
     eprintln!("  end_line     - Last line of block (zero-indexed)");
     eprintln!();
     eprintln!("EXAMPLES:");
-    eprintln!("  toggle_comment ./src/main.rs 5");
+    eprintln!("  toggle_comment hello_world.py 5");
     eprintln!("  toggle_comment --rust-doc-string ./src/lib.rs 10");
-    eprintln!("  toggle_comment --block ./src/main.rs 5 15");
-    eprintln!("  toggle_comment --toggle-list-standard ./src/main.rs 1 5 10 15");
+    eprintln!("  toggle_comment --block hello_world.rs 5 15");
+    eprintln!("  toggle_comment --list-basic hello_world.py 1 10 12");
+    eprintln!("  toggle_comment --list-docstring hello_world.toml 1 2 3");
+
     eprintln!();
     eprintln!("SUPPORTED EXTENSIONS:");
     eprintln!("  //  : rs, c, cpp, js, ts, java, go, swift");
@@ -227,26 +230,68 @@ fn execute_block_toggle(file_path: &str, start_line: usize, end_line: usize) -> 
     }
 }
 
-/// Execute batch toggle - basic comments (NOT IMPLEMENTED YET)
+// /// Execute batch toggle - basic comments (NOT IMPLEMENTED YET)
+// fn execute_batch_toggle_standard(
+//     file_path: &str,
+//     _count: usize,
+//     _lines: &[usize; MAX_BATCH_LINES],
+// ) -> i32 {
+//     eprintln!("Error: Batch toggle not yet implemented");
+//     eprintln!("File: {}", file_path);
+//     1
+// }
+
+// /// Execute batch toggle - docstrings (NOT IMPLEMENTED YET)
+// fn execute_batch_toggle_docstring(
+//     file_path: &str,
+//     _count: usize,
+//     _lines: &[usize; MAX_BATCH_LINES],
+// ) -> i32 {
+//     eprintln!("Error: Batch docstring toggle not yet implemented");
+//     eprintln!("File: {}", file_path);
+//     1
+// }
+
+/// Execute batch toggle - basic comments
 fn execute_batch_toggle_standard(
     file_path: &str,
-    _count: usize,
-    _lines: &[usize; MAX_BATCH_LINES],
+    count: usize,
+    lines: &[usize; MAX_BATCH_LINES],
 ) -> i32 {
-    eprintln!("Error: Batch toggle not yet implemented");
-    eprintln!("File: {}", file_path);
-    1
+    // Use only the valid portion of array
+    let line_slice = &lines[..count];
+
+    match toggle_multiple_basic_comments(file_path, line_slice) {
+        Ok(()) => {
+            println!("Successfully toggled {} lines", count);
+            0
+        }
+        Err(e) => {
+            eprintln!("Error batch toggling {}: {}", file_path, e);
+            error_to_exit_code(e)
+        }
+    }
 }
 
-/// Execute batch toggle - docstrings (NOT IMPLEMENTED YET)
+/// Execute batch toggle - docstrings
 fn execute_batch_toggle_docstring(
     file_path: &str,
-    _count: usize,
-    _lines: &[usize; MAX_BATCH_LINES],
+    count: usize,
+    lines: &[usize; MAX_BATCH_LINES],
 ) -> i32 {
-    eprintln!("Error: Batch docstring toggle not yet implemented");
-    eprintln!("File: {}", file_path);
-    1
+    // Use only the valid portion of array
+    let line_slice = &lines[..count];
+
+    match toggle_multiple_singline_docstrings(file_path, line_slice) {
+        Ok(()) => {
+            println!("Successfully toggled {} docstrings", count);
+            0
+        }
+        Err(e) => {
+            eprintln!("Error batch toggling docstrings {}: {}", file_path, e);
+            error_to_exit_code(e)
+        }
+    }
 }
 
 fn main() {
@@ -322,12 +367,10 @@ fn main() {
                 execute_block_toggle(file_path, start_line, end_line)
             }
 
-            "--toggle-list-standard" => {
-                // Expect: --toggle-list-standard <file> <line1> <line2> ...
+            "--list-basic" => {
+                // Expect: --list-basic <file> <line1> <line2> ...
                 if args.len() < 4 {
-                    eprintln!(
-                        "Error: --toggle-list-standard requires <file_path> <line1> [line2] ..."
-                    );
+                    eprintln!("Error: --list-basic requires <file_path> <line1> [line2] ...");
                     eprintln!();
                     print_usage();
                     process::exit(1);
@@ -347,12 +390,10 @@ fn main() {
                 execute_batch_toggle_standard(file_path, count, &line_array)
             }
 
-            "--toggle-list-rust-doc-string" => {
-                // Expect: --toggle-list-rust-doc-string <file> <line1> <line2> ...
+            "--list-docstring" => {
+                // Expect: --list-docstring <file> <line1> <line2> ...
                 if args.len() < 4 {
-                    eprintln!(
-                        "Error: --toggle-list-rust-doc-string requires <file_path> <line1> [line2] ..."
-                    );
+                    eprintln!("Error: --list-docstring requires <file_path> <line1> [line2] ...");
                     eprintln!();
                     print_usage();
                     process::exit(1);
