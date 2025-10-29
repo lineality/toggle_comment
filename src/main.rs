@@ -1,3 +1,5 @@
+//! # main.rs
+//!
 //! Command-line interface for toggle_basic_singleline_comment crate
 //!
 //! # Usage Modes

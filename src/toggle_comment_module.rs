@@ -1,16 +1,213 @@
 //! # toggle_comment_module.rs
 //!
-//! A simple, safe Rust crate to toggle comment flags on a specific line in source code files.
+//! A simple, safe Rust crate to toggle comment flags in source code files.
 //!
-//! ## Supported Languages
-//! - Rust, C, C++, JavaScript, etc. (using `//` comment flag)
-//! - Python, TOML, Shell scripts, etc. (using `#` comment flag)
+//! ## Overview
+//! This crate provides thread-safe, memory-efficient utilities to toggle comments on source code
+//! without loading entire files into memory. Three operating modes support different use cases:
+//! - **Single-line toggle**: Toggle basic comments (`//` or `#`) on one line
+//! - **Docstring toggle**: Toggle Rust doc comments (`///`) on one line
+//! - **Block comment toggle**: Add/remove block comment markers around line ranges (`/* */` or `"""`)
+//! - **Batch operations**: Toggle comments on multiple lines in one pass (max 128 lines)
 //!
-//! ## Supported Comment-Flag Modes
-//! - single-line comments
-//! - Rust doc string for single line '///'
-//! - possible future feature: \n/*\n \n*/\n and \n"""\n \n"""\n
-//!   added to new lines before and after the lines selected (not modifying within any line)
+//! ## Supported Languages & Comment Types
+//!
+//! ### Double-Slash Comments (`//`)
+//! Rust, C, C++, C#, Java, JavaScript, TypeScript, Go, Swift
+//! - Extensions: `rs`, `c`, `cpp`, `cc`, `cxx`, `h`, `hpp`, `js`, `ts`, `java`, `go`, `swift`
+//!
+//! ### Hash Comments (`#`)
+//! Python, Shell, Bash, TOML, YAML, Ruby, Perl, R
+//! - Extensions: `py`, `sh`, `bash`, `toml`, `yaml`, `yml`, `rb`, `pl`, `r`
+//!
+//! ### Block Comments (`/* */`)
+//! Rust, C, C++, C#, Java, JavaScript, TypeScript, Go, Swift
+//! - Supported for same languages as `//`
+//!
+//! ### Block Comments (`""" """`)
+//! Python (triple-quoted strings as docblocks)
+//! - Supported for `.py` files
+//!
+//! ### Rust Documentation (`///`)
+//! Rust doc comments (dedicated function)
+//! - Supported for `.rs` files
+//!
+//! ## Operating Modes
+//!
+//! ### Single-Line Comment Toggle
+//! Toggles comment flag at start of line (after leading whitespace):
+//!
+//! ```text
+//! Input:  "    println!(...);"
+//! Output: "// println!(...);"
+//!
+//! Input:  "// println!(...);"
+//! Output: "println!(...);"
+//! ```
+//!
+//! Pattern detection: `{0+ spaces}{flag}{1 space}{content}`
+//!
+//! ### Block Comment Toggle
+//! Automatically detects whether to add or remove markers:
+//!
+//! **Add Mode** (markers not present):
+//! ```text
+//! Input line 0:   "code line 1"
+//! Input line 1:   "code line 2"
+//!
+//! Output line 0:  "/*"
+//! Output line 1:  "code line 1"
+//! Output line 2:  "code line 2"
+//! Output line 3:  "*/"
+//! ```
+//!
+//! **Remove Mode** (markers present at specified lines):
+//! ```text
+//! Input line 0:   "/*"
+//! Input line 1:   "code line 1"
+//! Input line 2:   "code line 2"
+//! Input line 3:   "*/"
+//!
+//! Output line 0:  "code line 1"
+//! Output line 1:  "code line 2"
+//! ```
+//!
+//! ### Batch Operations
+//! Toggle comments on multiple lines with single backup and file pass:
+//! - Max 128 lines per operation
+//! - Input order doesn't matter (automatically sorted)
+//! - Duplicate lines handled automatically
+//! - More efficient than repeated single-line calls
+//!
+//! ## Safety & Reliability Features
+//!
+//! ### Memory Safety
+//! - **No heap allocation during processing**: Fixed pre-allocated buffers only
+//! - **Bounded operations**: All loops have upper limits to prevent hangs
+//! - **Line length limits**: Rejects lines exceeding 1MB (MAX_LINE_LENGTH)
+//! - **Batch size limits**: Max 128 lines per batch operation (MAX_BATCH_LINES)
+//!
+//! ### File Safety
+//! - **Atomic operations**: Original file only replaced on complete success
+//! - **Single backup**: Creates `backup_toggle_comment_{filename}` before modifications
+//! - **Temp files**: Uses process-ID in temp filename to avoid collisions
+//! - **Preserve file endings**: Maintains original line endings (LF, CRLF, or none)
+//!
+//! ### Error Handling
+//! - **All errors returned as `Result`**: No panics in production code
+//! - **Specific error types**: `ToggleError` enum provides detailed failure reasons
+//! - **I/O operation tracking**: Errors specify which operation failed (open, read, write, etc.)
+//! - **Recoverable**: Failed operations leave backups intact; original file untouched
+//!
+//! ## Usage Examples
+//!
+//! ### Toggle Single Line
+//! ```rust
+//! use toggle_basic_singleline_comment::toggle_basic_singleline_comment;
+//!
+//! match toggle_basic_singleline_comment("./src/main.rs", 5) {
+//!     Ok(()) => println!("Line 5 toggled"),
+//!     Err(e) => eprintln!("Failed: {}", e),
+//! }
+//! ```
+//!
+//! ### Toggle Rust Docstring
+//! ```rust
+//! use toggle_basic_singleline_comment::toggle_rust_docstring_singleline_comment;
+//!
+//! match toggle_rust_docstring_singleline_comment("./src/lib.rs", 10) {
+//!     Ok(()) => println!("Docstring toggled"),
+//!     Err(e) => eprintln!("Failed: {}", e),
+//! }
+//! ```
+//!
+//! ### Toggle Block Comment
+//! ```rust
+//! use toggle_basic_singleline_comment::toggle_block_comment;
+//!
+//! // Toggle block markers around lines 5-10
+//! match toggle_block_comment("./src/lib.rs", 5, 10) {
+//!     Ok(()) => println!("Block comment toggled"),
+//!     Err(e) => eprintln!("Failed: {}", e),
+//! }
+//! ```
+//!
+//! ### Batch Toggle Multiple Lines
+//! ```rust
+//! use toggle_basic_singleline_comment::toggle_multiple_basic_comments;
+//!
+//! let lines = [5, 10, 15, 20];
+//! match toggle_multiple_basic_comments("./src/main.rs", &lines) {
+//!     Ok(()) => println!("All 4 lines toggled in one pass"),
+//!     Err(e) => eprintln!("Failed: {}", e),
+//! }
+//! ```
+//!
+//! ## Limitations & Edge Cases
+//!
+//! ### Limitations
+//! - **Max file line length**: 1,000,000 bytes per line (rejects longer lines)
+//! - **Max batch lines**: 128 lines per batch operation
+//! - **Extension-based**: Comment type determined by file extension (case-insensitive)
+//! - **Simple pattern matching**: Only detects `{spaces}{flag}{space}` pattern
+//! - **Line-based**: Does not modify content within lines, only toggle markers
+//!
+//! ### Supported Edge Cases
+//! - ✓ Empty lines: `\n` → `// \n` (blank comments allowed)
+//! - ✓ Whitespace-only lines: `    \n` → `//     \n` (preserves internal spaces)
+//! - ✓ Tab indentation: Treated as any other character
+//! - ✓ No newline at EOF: Last line without `\n` preserved as-is
+//! - ✓ Mixed line endings: CRLF (`\r\n`) and LF (`\n`) both preserved
+//! - ✓ Last line of file: Can be toggled like any other line
+//! - ✓ Only whitespace + flag: `    // \n` → `\n` (removes all)
+//!
+//! ### Not Supported (By Design)
+//! - ✗ Inline comments: `code // comment` on same line (flag must start line)
+//! - ✗ Partial line modification: Comments must be at line start
+//! - ✗ Nested block comments: Detection assumes non-nested markers
+//! - ✗ Smart content parsing: No language-aware syntax analysis
+//! - ✗ Format preservation: Line formatting outside flag not preserved/modified
+//!
+//! ## Implementation Notes
+//!
+//! ### Design Principles
+//! - **Stateless**: Each operation independent; no persistent state
+//! - **Simple**: Narrow scope, single responsibility per function
+//! - **Safe**: All operations atomic and recoverable
+//! - **Efficient**: Single file pass, bounded buffers, minimal allocations
+//! - **Communicable**: Clear errors, explicit limits, documented behavior
+//!
+//! ### Internal Details
+//! - Reads source file line-by-line with 8KB buffer
+//! - Maintains sorted array of target lines for O(1) lookup in batch operations
+//! - Writes to temp file in same directory; replaces original only on success
+//! - Backup file overwritten (not versioned) on each operation
+//! - All path operations use canonical absolute paths
+//!
+//! ## Error Handling
+//!
+//! The `ToggleError` enum provides specific error information:
+//! - `FileNotFound`: Specified file does not exist
+//! - `NoExtension`: File has no extension (cannot determine comment type)
+//! - `UnsupportedExtension`: Extension not recognized for any comment mode
+//! - `LineNotFound { requested, file_lines }`: Target line beyond EOF
+//! - `IoError(operation)`: I/O failure during backup, read, write, etc.
+//! - `PathError`: Filesystem path manipulation failed
+//! - `LineTooLong { line_number, length }`: Line exceeds 1MB limit
+//! - `InconsistentBlockMarkers`: Only one block marker found (not both)
+//! - `InvalidLineRange`: Block range invalid (start >= end)
+//!
+//! ## Performance Characteristics
+//!
+//! | Operation | Time Complexity | Space |
+//! |-----------|-----------------|-------|
+//! | Single-line toggle | O(n) | O(1) |
+//! | Batch toggle (128 lines) | O(n log m) | O(1) |
+//! | Block toggle | O(n) | O(1) |
+//!
+//! Where `n` = file lines, `m` = batch size ≤ 128
+//!
+//! All operations use constant stack space regardless of file size.
 //!
 //! ## Safety & Policy
 //! - Never loads entire file into memory
@@ -22,29 +219,9 @@
 //! - Not swiss-army-knife functions: keep it simple, maintainable, communicable, plannable
 //! - See more rules in comments below
 //! - No event will result in a panic-crash, everything is handled.
-//!
-//! ## Usage
-//! ```rust
-//! use toggle_basic_singleline_comment::toggle_basic_singleline_comment;
-//!
-//! // Toggle comment on line 5 (zero-indexed) in main.rs
-//! match toggle_basic_singleline_comment("/absolute/path/to/main.rs", 5) {
-//!     Ok(()) => println!("Comment toggled successfully"),
-//!     Err(e) => eprintln!("Error: {:?}", e),
-//! }
-//! ```
 
 /*
-TODO:
-1. /// mode [Done]
-
-2. Is there a clean way to take in a list of lines,
-so the file backup is not redundant for a 'set' of operations?
-state-less no-heap is a challenge here but a good one.
-what is realistic? what is practical?
-Good-enough and maintainable is infinitly than a broken moonshot.
-a list of 64 rows if memory-slim might be fine.
-
+# Notes:
 
 ```
 ////////////
@@ -53,89 +230,462 @@ will be ignored, that is by design.
 
 the goal is to be able to turn-on, turn off, commments
 reliably in this system, not to micro-manage the rest of the universe.
-
-
 */
 
 /*
-Example main function:
+# Example main function:
+
+```
+//! # main.rs
+//!
 //! Command-line interface for toggle_basic_singleline_comment crate
 //!
-//! Usage: toggle_basic_singleline_comment <file_path> <line_number>
+//! # Usage Modes
 //!
-//! Example: toggle_basic_singleline_comment ./src/main.rs 5
+//! ## Basic single-line toggle (auto-detect comment type from extension)
+//! ```text
+//! toggle_comment <file_path> <line_number>
+//! ```
+//!
+//! ## Rust docstring single-line toggle (///)
+//! ```text
+//! toggle_comment --rust-doc-string <file_path> <line_number>
+//! ```
+//!
+//! ## Block comment toggle (insert/remove /* */ or """ """)
+//! ```text
+//! toggle_comment --block <file_path> <start_line> <end_line>
+//! ```
+//!
+//! ## Batch toggle - basic comments
+//! ```text
+//! toggle_comment --list-basic <file_path> <line1> <line2> ... <lineN>
+//! ```
+//!
+//! ## Batch toggle - rust docstrings
+//! ```text
+//! toggle_comment --list-docstring <file_path> <line1> <line2> ... <lineN>
+//! ```
 
 use std::env;
 use std::process;
 mod toggle_comment_module;
-use toggle_comment_module::{ToggleError, toggle_basic_singleline_comment};
+use toggle_comment_module::{
+    ToggleError, toggle_basic_singleline_comment, toggle_block_comment,
+    toggle_multiple_basic_comments, toggle_multiple_singline_docstrings,
+    toggle_rust_docstring_singleline_comment,
+};
 
-/// Print usage information and exit
+/// Maximum number of lines that can be toggled in batch mode
+/// Prevents unbounded memory usage while still being practical
+const MAX_BATCH_LINES: usize = 512;
+
+/// Print comprehensive usage information and exit
 fn print_usage() {
-    eprintln!("Usage: toggle_basic_singleline_comment <file_path> <line_number>");
+    eprintln!("toggle_comment - Toggle comments in source code files");
     eprintln!();
-    eprintln!("Arguments:");
+    eprintln!("USAGE:");
+    eprintln!("  toggle_comment <file_path> <line_number>");
+    eprintln!("  toggle_comment --rust-doc-string <file_path> <line_number>");
+    eprintln!("  toggle_comment --block <file_path> <start_line> <end_line>");
+    eprintln!("  toggle_comment --list-basic <file_path> <line1> <line2> ...");
+    eprintln!("  toggle_comment --list-docstring <file_path> <line1> <line2> ...");
+    eprintln!();
+    eprintln!("MODES:");
+    eprintln!("  Basic mode:");
+    eprintln!("    Auto-detects comment type from file extension");
+    eprintln!("    Toggles // or # on a single line");
+    eprintln!();
+    eprintln!("  --rust-doc-string:");
+    eprintln!("    Toggles Rust documentation comment (///) on a single line");
+    eprintln!();
+    eprintln!("  --block:");
+    eprintln!("    Toggles block comments around a range of lines");
+    eprintln!("    Inserts /* before start_line and */
+ after end_line (or removes them)");
+    eprintln!("    For Python: uses \"\"\" instead");
+    eprintln!();
+    eprintln!("  --list-basic:");
+    eprintln!("    Toggle basic comments on multiple lines in one operation");
+    eprintln!("    Maximum {} lines per batch", MAX_BATCH_LINES);
+    eprintln!();
+    eprintln!("  --list-docstring:");
+    eprintln!("    Toggle /// comments on multiple lines in one operation");
+    eprintln!("    Maximum {} lines per batch", MAX_BATCH_LINES);
+    eprintln!();
+    eprintln!("ARGUMENTS:");
     eprintln!("  file_path    - Path to source code file");
     eprintln!("  line_number  - Line number to toggle (zero-indexed)");
+    eprintln!("  start_line   - First line of block (zero-indexed)");
+    eprintln!("  end_line     - Last line of block (zero-indexed)");
     eprintln!();
-    eprintln!("Example:");
-    eprintln!("  toggle_basic_singleline_comment ./src/main.rs 5");
+    eprintln!("EXAMPLES:");
+    eprintln!("  toggle_comment hello_world.py 5");
+    eprintln!("  toggle_comment --rust-doc-string ./src/lib.rs 10");
+    eprintln!("  toggle_comment --block hello_world.rs 5 15");
+    eprintln!("  toggle_comment --list-basic hello_world.py 1 10 12");
+    eprintln!("  toggle_comment --list-docstring hello_world.toml 1 2 3");
+
     eprintln!();
-    eprintln!("Supported extensions:");
-eprintln!(" // : rs, c, cpp, js, ts, java, go, swift");
-    eprintln!("  #  : py, sh, toml, yaml, rb, pl, r");
+    eprintln!("SUPPORTED EXTENSIONS:");
+    eprintln!("  //  : rs, c, cpp, js, ts, java, go, swift");
+    eprintln!("  #   : py, sh, toml, yaml, rb, pl, r");
+    eprintln!();
+    eprintln!("EXIT CODES:");
+    eprintln!("  0 - Success");
+    eprintln!("  1 - Invalid arguments");
+    eprintln!("  2 - File not found");
+    eprintln!("  3 - No extension");
+    eprintln!("  4 - Unsupported extension");
+    eprintln!("  5 - Line not found");
+    eprintln!("  6 - I/O error");
+    eprintln!("  7 - Path error");
+    eprintln!("  8 - Line too long");
+}
+
+/// Parse a line number argument, returning error on invalid input
+///
+/// # Arguments
+/// * `arg` - String slice to parse
+/// * `arg_name` - Name of argument for error messages
+///
+/// # Returns
+/// * `Ok(usize)` - Successfully parsed line number
+/// * `Err(())` - Parse failed (error already printed to stderr)
+fn parse_line_number(arg: &str, arg_name: &str) -> Result<usize, ()> {
+    match arg.parse::<usize>() {
+        Ok(n) => Ok(n),
+        Err(_) => {
+            eprintln!("Error: {} must be a valid integer", arg_name);
+            eprintln!();
+            Err(())
+        }
+    }
+}
+
+/// Parse multiple line number arguments into a fixed-size array
+///
+/// # Arguments
+/// * `args` - Slice of string arguments to parse
+///
+/// # Returns
+/// * `Ok((count, array))` - Successfully parsed line numbers
+/// * `Err(())` - Parse failed or too many lines
+///
+/// # Safety
+/// - Bounded to MAX_BATCH_LINES (512)
+/// - Pre-allocated fixed array on stack
+fn parse_line_list(args: &[String]) -> Result<(usize, [usize; MAX_BATCH_LINES]), ()> {
+// Check bounds
+    if args.is_empty() {
+        eprintln!("Error: No line numbers provided");
+        return Err(());
+    }
+
+    if args.len() > MAX_BATCH_LINES {
+        eprintln!("Error: Too many lines (max {})", MAX_BATCH_LINES);
+        return Err(());
+    }
+
+// Pre-allocate fixed array
+    let mut line_array: [usize; MAX_BATCH_LINES] = [0; MAX_BATCH_LINES];
+    let count = args.len();
+
+// Parse each line number
+    for (i, arg) in args.iter().enumerate() {
+        match arg.parse::<usize>() {
+            Ok(n) => line_array[i] = n,
+            Err(_) => {
+                eprintln!("Error: Invalid line number: {}", arg);
+                return Err(());
+            }
+        }
+    }
+
+    Ok((count, line_array))
+}
+
+/// Convert ToggleError to exit code
+///
+/// # Arguments
+/// * `error` - The error to convert
+///
+/// # Returns
+/// * Exit code (2-8)
+fn error_to_exit_code(error: ToggleError) -> i32 {
+    match error {
+        ToggleError::FileNotFound => 2,
+        ToggleError::NoExtension => 3,
+        ToggleError::UnsupportedExtension => 4,
+        ToggleError::LineNotFound { .. } => 5,
+        ToggleError::IoError(_) => 6,
+        ToggleError::PathError => 7,
+        ToggleError::LineTooLong { .. } => 8,
+        ToggleError::InconsistentBlockMarkers => 9,
+        ToggleError::InvalidLineRange => 10,
+    }
+}
+
+/// Execute basic single-line comment toggle
+fn execute_basic_toggle(file_path: &str, line_number: usize) -> i32 {
+    match toggle_basic_singleline_comment(file_path, line_number) {
+        Ok(()) => {
+            println!("Successfully toggled comment on line {}", line_number);
+            0
+        }
+        Err(e) => {
+            eprintln!("Error toggling {}: {}", file_path, e);
+            error_to_exit_code(e)
+        }
+    }
+}
+
+/// Execute Rust docstring single-line comment toggle
+fn execute_docstring_toggle(file_path: &str, line_number: usize) -> i32 {
+    match toggle_rust_docstring_singleline_comment(file_path, line_number) {
+        Ok(()) => {
+            println!("Successfully toggled docstring on line {}", line_number);
+            0
+        }
+        Err(e) => {
+            eprintln!("Error toggling docstring {}: {}", file_path, e);
+            error_to_exit_code(e)
+        }
+    }
+}
+
+/// Execute block comment toggle
+fn execute_block_toggle(file_path: &str, start_line: usize, end_line: usize) -> i32 {
+    match toggle_block_comment(file_path, start_line, end_line) {
+        Ok(()) => {
+            println!(
+                "Successfully toggled block comment (lines {}-{})",
+                start_line, end_line
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!("Error toggling block {}: {}", file_path, e);
+            error_to_exit_code(e)
+        }
+    }
+}
+
+// /// Execute batch toggle - basic comments (NOT IMPLEMENTED YET)
+// fn execute_batch_toggle_standard(
+//     file_path: &str,
+//     _count: usize,
+//     _lines: &[usize; MAX_BATCH_LINES],
+// ) -> i32 {
+//     eprintln!("Error: Batch toggle not yet implemented");
+//     eprintln!("File: {}", file_path);
+//     1
+// }
+
+// /// Execute batch toggle - docstrings (NOT IMPLEMENTED YET)
+// fn execute_batch_toggle_docstring(
+//     file_path: &str,
+//     _count: usize,
+//     _lines: &[usize; MAX_BATCH_LINES],
+// ) -> i32 {
+//     eprintln!("Error: Batch docstring toggle not yet implemented");
+//     eprintln!("File: {}", file_path);
+//     1
+// }
+
+/// Execute batch toggle - basic comments
+fn execute_batch_toggle_standard(
+    file_path: &str,
+    count: usize,
+    lines: &[usize; MAX_BATCH_LINES],
+) -> i32 {
+// Use only the valid portion of array
+    let line_slice = &lines[..count];
+
+    match toggle_multiple_basic_comments(file_path, line_slice) {
+        Ok(()) => {
+            println!("Successfully toggled {} lines", count);
+            0
+        }
+        Err(e) => {
+            eprintln!("Error batch toggling {}: {}", file_path, e);
+            error_to_exit_code(e)
+        }
+    }
+}
+
+/// Execute batch toggle - docstrings
+fn execute_batch_toggle_docstring(
+    file_path: &str,
+    count: usize,
+    lines: &[usize; MAX_BATCH_LINES],
+) -> i32 {
+// Use only the valid portion of array
+    let line_slice = &lines[..count];
+
+    match toggle_multiple_singline_docstrings(file_path, line_slice) {
+        Ok(()) => {
+            println!("Successfully toggled {} docstrings", count);
+            0
+        }
+        Err(e) => {
+            eprintln!("Error batch toggling docstrings {}: {}", file_path, e);
+            error_to_exit_code(e)
+        }
+    }
 }
 
 fn main() {
 // Collect command line arguments
     let args: Vec<String> = env::args().collect();
 
-// Check argument count
-    if args.len() != 3 {
+// Minimum: program name + at least 2 args
+    if args.len() < 3 {
         eprintln!("Error: Invalid number of arguments");
+        eprintln!();
         print_usage();
         process::exit(1);
     }
 
-// Parse arguments
-    let file_path = &args[1];
-    let line_number = match args[2].parse::<usize>() {
-        Ok(n) => n,
-        Err(_) => {
-            eprintln!("Error: Line number must be a valid integer");
+// Determine mode based on first argument
+    let exit_code = if args[1].starts_with("--") {
+// Flag-based mode
+        let flag = &args[1];
+
+        match flag.as_str() {
+            "--rust-doc-string" => {
+// Expect: --rust-doc-string <file> <line>
+                if args.len() != 4 {
+                    eprintln!("Error: --rust-doc-string requires <file_path> <line_number>");
+                    eprintln!();
+                    print_usage();
+                    process::exit(1);
+                }
+
+                let file_path = &args[2];
+                let line_number = match parse_line_number(&args[3], "line_number") {
+                    Ok(n) => n,
+                    Err(_) => {
+                        print_usage();
+                        process::exit(1);
+                    }
+                };
+
+                execute_docstring_toggle(file_path, line_number)
+            }
+
+            "--block" => {
+// Expect: --block <file> <start_line> <end_line>
+                if args.len() != 5 {
+                    eprintln!("Error: --block requires <file_path> <start_line> <end_line>");
+                    eprintln!();
+                    print_usage();
+                    process::exit(1);
+                }
+
+                let file_path = &args[2];
+                let start_line = match parse_line_number(&args[3], "start_line") {
+                    Ok(n) => n,
+                    Err(_) => {
+                        print_usage();
+                        process::exit(1);
+                    }
+                };
+                let end_line = match parse_line_number(&args[4], "end_line") {
+                    Ok(n) => n,
+                    Err(_) => {
+                        print_usage();
+                        process::exit(1);
+                    }
+                };
+
+// Validate line order
+                if start_line >= end_line {
+                    eprintln!("Error: start_line must be less than end_line");
+                    process::exit(1);
+                }
+
+                execute_block_toggle(file_path, start_line, end_line)
+            }
+
+            "--list-basic" => {
+// Expect: --list-basic <file> <line1> <line2> ...
+                if args.len() < 4 {
+                    eprintln!("Error: --list-basic requires <file_path> <line1> [line2] ...");
+                    eprintln!();
+                    print_usage();
+                    process::exit(1);
+                }
+
+                let file_path = &args[2];
+                let line_args = &args[3..];
+
+                let (count, line_array) = match parse_line_list(line_args) {
+                    Ok(result) => result,
+                    Err(_) => {
+                        print_usage();
+                        process::exit(1);
+                    }
+                };
+
+                execute_batch_toggle_standard(file_path, count, &line_array)
+            }
+
+            "--list-docstring" => {
+// Expect: --list-docstring <file> <line1> <line2> ...
+                if args.len() < 4 {
+                    eprintln!("Error: --list-docstring requires <file_path> <line1> [line2] ...");
+                    eprintln!();
+                    print_usage();
+                    process::exit(1);
+                }
+
+                let file_path = &args[2];
+                let line_args = &args[3..];
+
+                let (count, line_array) = match parse_line_list(line_args) {
+                    Ok(result) => result,
+                    Err(_) => {
+                        print_usage();
+                        process::exit(1);
+                    }
+                };
+
+                execute_batch_toggle_docstring(file_path, count, &line_array)
+            }
+
+            _ => {
+                eprintln!("Error: Unknown flag: {}", flag);
+                eprintln!();
+                print_usage();
+                process::exit(1);
+            }
+        }
+    } else {
+// Basic mode: <file> <line>
+        if args.len() != 3 {
+            eprintln!("Error: Basic mode requires <file_path> <line_number>");
+            eprintln!();
             print_usage();
             process::exit(1);
         }
+
+        let file_path = &args[1];
+        let line_number = match parse_line_number(&args[2], "line_number") {
+            Ok(n) => n,
+            Err(_) => {
+                print_usage();
+                process::exit(1);
+            }
+        };
+
+        execute_basic_toggle(file_path, line_number)
     };
 
-// Execute toggle_basic_singleline_comment
-// Run toggle comment
-// return standard exit code:
-// zero is ok
-// error has number above zero
-    match toggle_basic_singleline_comment(file_path, line_number) {
-        Ok(()) => {
-            println!("Successfully toggled comment on line {}", line_number);
-            process::exit(0);
-        }
-        Err(e) => {
-            eprintln!("Error: {}", e);
-
-// Return specific exit codes for different error types
-            let exit_code = match e {
-                ToggleError::FileNotFound(_) => 2,
-                ToggleError::NoExtension(_) => 3,
-                ToggleError::UnsupportedExtension(_) => 4,
-                ToggleError::LineNotFound { .. } => 5,
-                ToggleError::IoError { .. } => 6,
-                ToggleError::PathError(_) => 7,
-                ToggleError::LineTooLong { .. } => 8,
-            };
-
-            process::exit(exit_code);
-        }
-    }
+// Exit with appropriate code
+    process::exit(exit_code);
 }
+
 */
 
 /*
