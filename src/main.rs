@@ -177,6 +177,8 @@ fn error_to_exit_code(error: ToggleError) -> i32 {
         ToggleError::IoError(_) => 6,
         ToggleError::PathError => 7,
         ToggleError::LineTooLong { .. } => 8,
+        ToggleError::InconsistentBlockMarkers => 9,
+        ToggleError::InvalidLineRange => 10,
     }
 }
 

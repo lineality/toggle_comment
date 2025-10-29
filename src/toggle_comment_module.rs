@@ -36,15 +36,7 @@
 
 /*
 TODO:
-1. /// mode, separate function, not overloading existing code.
-<NOT A COMBINED SWISS ARMY KNIFE FUNCTION!!!!!!!!!!!>
-This should be able to operate in the same simple way as //
-not conflicting.
-if a line starts with {N spaces}{///}{1 space}, that is a match
-otherwise not.
-'//' does not conflict with this.
-please be 100% clear IF you see a problem with this design.
-can "// " collide with "/// " ? yes or no?
+1. /// mode [Done]
 
 2. Is there a clean way to take in a list of lines,
 so the file backup is not redundant for a 'set' of operations?
@@ -68,15 +60,40 @@ a list of 512 rows if memory-slim might be fine.
    language-extention based route is the same as before:
    .rs uses /**/, python uses """ """, etc.
 
-   This should be nearly identical to adding or removing "// "
-   the only differences are:
-   - for rust there are two different patterns "\n/*\n" and "\n*/
-\n", not a big problem
-- we are looking not ahead for " // ", but looking at only 3 bytes (in the case of hash block),
-     the middle of which is the symbol, before and after which are newlines.
-   - there are two test conditions not one: both lines must be matched to be a match
-   - there can be an edge case: if only one line matches: do nothing
-   message: "one match"
+   ok! great start. toggle-off is working
+
+   but I two issues:
+   1. I may need to re-think my logic for toggle on
+   2. this is over-writing a line (removing a whole line of code)... which is VERY BAD, that should NOT be happening
+
+   note: toggle-off works fine.
+
+   Toggle on will be given two lines:
+   1. check if they are both already 'off' (this is probably working fine).
+   2.  let's look at an example
+
+   line, code
+   ```
+   5  # Comment alpha
+   6  # Comment b
+   7  # Comment 13
+   ```
+
+   we run (assuming these are zero-index lines)
+   ```
+   cargo run -- --block hello_world.py 5 7
+   ```
+
+   1. check if they are both currently 'on' or 'off'
+   (assuming found to be 'off')
+   2. start toggle-on action: starting at end
+   3. add '\n"""\n' to the beginning of line 8 (update, NOT line 7!)
+   4. add '\n"""\n' to the beginning of line 5
+
+
+   can you see how the current code is not doing this?
+   (how on earth is toggle-on deleting a line of code???)
+   there is no 'remove' action in toggle-on mode...
 
    being an exact match, not forward pattern, should make it overall much simpler (if more steps)
 
@@ -358,6 +375,12 @@ pub enum ToggleError {
 
     /// Line exceeds maximum safe length
     LineTooLong { line_number: usize, length: usize },
+
+    /// Block comment markers are inconsistent (only one present)
+    InconsistentBlockMarkers,
+
+    /// Invalid line range for block comment
+    InvalidLineRange,
 }
 
 /// Specific I/O operations that can fail
@@ -365,16 +388,22 @@ pub enum ToggleError {
 pub enum IoOperation {
     /// Creating backup file
     Backup,
+
     /// Opening source file for reading
     Open,
+
     /// Creating temporary/destination file
     Create,
+
     /// Reading line from file
     Read,
+
     /// Writing line to file
     Write,
+
     /// Flushing write buffer
     Flush,
+
     /// Replacing original file with modified version
     Replace,
 }
@@ -403,6 +432,12 @@ impl std::fmt::Display for ToggleError {
             } => {
                 write!(f, "Line {} too long: {} bytes", line_number, length)
             }
+            ToggleError::InconsistentBlockMarkers => {
+                write!(f, "Inconsistent block markers (only one found)")
+            }
+            ToggleError::InvalidLineRange => {
+                write!(f, "Invalid line range")
+            }
         }
     }
 }
@@ -414,15 +449,20 @@ impl std::error::Error for ToggleError {}
 enum CommentFlag {
     /// Tripple Slash for Rust-Docstrings
     TripppleSlash,
+
     /// Double-slash comments (Rust, C, C++, JavaScript, etc.)
     DoubleSlash,
+
     /// Hash/pound comments (Python, Shell, TOML, etc.)
     Hash,
-    // Python Type Doc Block
+
+    /// Python Type Doc Block
     QuoteBlock,
-    // Rust Type Doc Block Start
+
+    /// Rust Type Doc Block Start
     SlashBlockStart,
-    // Rust Type Doc Block End
+
+    /// Rust Type Doc Block End
     SlashBlockEnd,
 }
 
@@ -628,14 +668,528 @@ pub fn toggle_rust_docstring_singleline_comment(
         }
     }
 }
-// TODO, if possible
-// note: do last-first, avoid frameshift problem
+
+// ================
+// Block Party Mode
+// ================
+
+/// Block comment markers for different languages
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BlockMarkers {
+    start: &'static [u8],
+    end: &'static [u8],
+}
+
+/// Determine block comment markers from file extension
+///
+/// # Arguments
+/// * `extension` - File extension without dot
+///
+/// # Returns
+/// * `Some(BlockMarkers)` - Start and end markers for this language
+/// * `None` - Extension not supported for block comments
+fn determine_block_markers(extension: &str) -> Option<BlockMarkers> {
+    match extension.to_lowercase().as_str() {
+        // C-style block comments: /* */
+        "rs" | "c" | "cpp" | "cc" | "cxx" | "h" | "hpp" | "js" | "ts" | "java" | "go" | "swift" => {
+            Some(BlockMarkers {
+                start: b"/*\n",
+                end: b"*/\n",
+            })
+        }
+
+        // Python triple-quote: """ """
+        "py" => Some(BlockMarkers {
+            start: b"\"\"\"\n",
+            end: b"\"\"\"\n",
+        }),
+
+        // Shell/TOML/YAML don't have block comments
+        _ => None,
+    }
+}
+
+/// Mode for block comment operation
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlockMode {
+    /// Add block markers (markers not present)
+    Add,
+    /// Remove block markers (markers present)
+    Remove,
+}
+
+/// Detect whether block markers are present
+///
+/// # Arguments
+/// * `file_path` - Path to file
+/// * `start_line` - Expected position of start marker (or first content line)
+/// * `end_line` - Expected position of end marker (or last content line + 1)
+/// * `markers` - Block markers to check for
+///
+/// # Returns
+/// * `Ok(BlockMode::Add)` - Markers not present
+/// * `Ok(BlockMode::Remove)` - Markers present
+/// * `Err(InconsistentBlockMarkers)` - Only one marker present
+/// * `Err(LineNotFound)` - File too short
+///
+/// # Detection Logic
+/// Checks if:
+/// - Line at start_line is EXACTLY the start marker
+/// - Line at end_line is EXACTLY the end marker
+/// Both must match for Remove mode, neither for Add mode
+fn detect_block_mode(
+    file_path: &Path,
+    start_line: usize,
+    end_line: usize,
+    markers: BlockMarkers,
+) -> Result<BlockMode, ToggleError> {
+    // Open file for reading
+    let file = match File::open(file_path) {
+        Ok(f) => f,
+        Err(_) => return Err(ToggleError::IoError(IoOperation::Open)),
+    };
+
+    let mut reader = BufReader::with_capacity(IO_BUFFER_SIZE, file);
+    let mut line_buffer = Vec::with_capacity(MAX_LINE_LENGTH);
+
+    let mut current_line: usize = 0;
+    let mut start_is_marker = false;
+    let mut end_is_marker = false;
+    let mut found_start_line = false;
+    let mut found_end_line = false;
+
+    // Safety limit for loop
+    let line_limit = end_line.saturating_add(1000);
+
+    // Read until we've checked both positions
+    loop {
+        // Safety: prevent unbounded loop
+        if current_line > line_limit {
+            return Err(ToggleError::IoError(IoOperation::Read));
+        }
+
+        line_buffer.clear();
+
+        let bytes_read = match reader.read_until(b'\n', &mut line_buffer) {
+            Ok(n) => n,
+            Err(_) => return Err(ToggleError::IoError(IoOperation::Read)),
+        };
+
+        // End of file
+        if bytes_read == 0 {
+            break;
+        }
+
+        // Check line length
+        if line_buffer.len() > MAX_LINE_LENGTH {
+            return Err(ToggleError::LineTooLong {
+                line_number: current_line,
+                length: line_buffer.len(),
+            });
+        }
+
+        // Check if this is start_line
+        if current_line == start_line {
+            found_start_line = true;
+            start_is_marker = line_buffer.as_slice() == markers.start;
+        }
+
+        // Check if this is end_line (the line after the content range)
+        if current_line == end_line {
+            found_end_line = true;
+            end_is_marker = line_buffer.as_slice() == markers.end;
+            // Found both - can stop reading
+            break;
+        }
+
+        current_line += 1;
+    }
+
+    // Verify we found both line positions
+    if !found_start_line {
+        return Err(ToggleError::LineNotFound {
+            requested: start_line,
+            file_lines: current_line,
+        });
+    }
+
+    if !found_end_line {
+        return Err(ToggleError::LineNotFound {
+            requested: end_line,
+            file_lines: current_line,
+        });
+    }
+
+    // Determine mode based on marker presence
+    match (start_is_marker, end_is_marker) {
+        (true, true) => Ok(BlockMode::Remove),
+        (false, false) => Ok(BlockMode::Add),
+        _ => Err(ToggleError::InconsistentBlockMarkers),
+    }
+}
+/// Toggle block comment around a range of lines
+///
+/// # Arguments
+/// * `file_path` - Path to source file
+/// * `start_line` - For Add: first content line. For Remove: the start marker line
+/// * `end_line` - For Add: last content line. For Remove: the end marker line
+///
+/// # Logic
+/// **Detection:**
+/// - Check if line[start_line] == start_marker AND line[end_line] == end_marker
+/// - If both match: Remove mode (skip those lines)
+/// - If neither match: Add mode (insert new lines adjacent)
+/// - If only one matches: Error (inconsistent)
+///
+/// **Add Mode:** Insert markers around content
+/// - At start_line: INSERT marker before, then write content
+/// - At end_line: write content, then INSERT marker after
+///
+/// **Remove Mode:** Delete marker lines
+/// - At start_line: SKIP (don't write - this deletes the marker)
+/// - At end_line: SKIP (don't write - this deletes the marker)
 pub fn toggle_block_comment(
     file_path: &str,
-    start_rowline_zeroindex: usize,
-    end_rowline_zeroindex: usize,
+    start_line: usize,
+    end_line: usize,
 ) -> Result<(), ToggleError> {
+    // Validate line range
+    if start_line >= end_line {
+        return Err(ToggleError::InvalidLineRange);
+    }
+
+    // Convert to absolute path
+    let absolute_path = match Path::new(file_path).canonicalize() {
+        Ok(p) => p,
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                return Err(ToggleError::FileNotFound);
+            }
+            return Err(ToggleError::PathError);
+        }
+    };
+
+    // Extract and validate extension
+    let extension = match absolute_path.extension() {
+        Some(ext) => ext.to_string_lossy().to_string(),
+        None => return Err(ToggleError::NoExtension),
+    };
+
+    // Determine block markers from extension
+    let markers = match determine_block_markers(&extension) {
+        Some(m) => m,
+        None => return Err(ToggleError::UnsupportedExtension),
+    };
+
+    // Detect current state - are markers present AT these line positions?
+    let mode = detect_block_mode(&absolute_path, start_line, end_line, markers)?;
+
+    // Get filename for backup
+    let filename = match absolute_path.file_name() {
+        Some(name) => name.to_string_lossy().to_string(),
+        None => return Err(ToggleError::PathError),
+    };
+
+    // Create backup path
+    let backup_filename = format!("backup_toggle_comment_{}", filename);
+    let backup_path = PathBuf::from(&backup_filename);
+
+    // Create backup
+    if let Err(_) = std::fs::copy(&absolute_path, &backup_path) {
+        return Err(ToggleError::IoError(IoOperation::Backup));
+    }
+
+    // Create temp file
+    let temp_filename = format!("temp_toggle_block_{}_{}", std::process::id(), filename);
+    let temp_path = PathBuf::from(&temp_filename);
+
+    // Process file
+    let process_result = process_block_toggle(
+        &absolute_path,
+        &temp_path,
+        start_line,
+        end_line,
+        markers,
+        mode,
+    );
+
+    // Handle result
+    match process_result {
+        Ok(()) => {
+            // Success: replace original
+            if let Err(_) = std::fs::copy(&temp_path, &absolute_path) {
+                let _ = std::fs::remove_file(&temp_path);
+                return Err(ToggleError::IoError(IoOperation::Replace));
+            }
+
+            // Clean up temp
+            if let Err(_) = std::fs::remove_file(&temp_path) {
+                #[cfg(debug_assertions)]
+                eprintln!("Warning: Failed to clean up temp file");
+            }
+
+            Ok(())
+        }
+        Err(e) => {
+            // Failed: clean up and return error
+            let _ = std::fs::remove_file(&temp_path);
+            Err(e)
+        }
+    }
+}
+
+/// Process file to add or remove block comment markers
+///
+/// # Add Mode Logic (Insert new marker lines)
+/// ```text
+/// Source:           Output:
+/// line 4            line 4
+/// line 5 (start) -> """         <- INSERTED
+///                   line 5      <- copied
+/// line 6            line 6
+/// line 7 (end)   -> line 7      <- copied
+///                   """         <- INSERTED
+/// line 8            line 8
+/// ```
+///
+/// # Remove Mode Logic (Delete marker lines)
+/// ```text
+/// Source:           Output:
+/// line 4            line 4
+/// line 5 (marker) -> [SKIP]     <- DELETED
+/// line 6            line 6
+/// line 7 (marker) -> [SKIP]     <- DELETED
+/// line 8            line 8
+/// ```
+fn process_block_toggle(
+    source_path: &Path,
+    dest_path: &Path,
+    start_line: usize,
+    end_line: usize,
+    markers: BlockMarkers,
+    mode: BlockMode,
+) -> Result<(), ToggleError> {
+    // Open source file
+    let source_file = match File::open(source_path) {
+        Ok(f) => f,
+        Err(_) => return Err(ToggleError::IoError(IoOperation::Open)),
+    };
+
+    let mut reader = BufReader::with_capacity(IO_BUFFER_SIZE, source_file);
+
+    // Create destination file
+    let dest_file = match OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(dest_path)
+    {
+        Ok(f) => f,
+        Err(_) => return Err(ToggleError::IoError(IoOperation::Create)),
+    };
+
+    let mut writer = BufWriter::with_capacity(IO_BUFFER_SIZE, dest_file);
+
+    let mut line_buffer = Vec::with_capacity(MAX_LINE_LENGTH);
+    let mut current_line: usize = 0;
+    let line_limit = end_line.saturating_add(1000000);
+
+    // Process file line by line
+    loop {
+        // Safety check
+        if current_line > line_limit {
+            return Err(ToggleError::IoError(IoOperation::Read));
+        }
+
+        line_buffer.clear();
+
+        let bytes_read = match reader.read_until(b'\n', &mut line_buffer) {
+            Ok(n) => n,
+            Err(_) => return Err(ToggleError::IoError(IoOperation::Read)),
+        };
+
+        // End of file
+        if bytes_read == 0 {
+            break;
+        }
+
+        // Safety: check line length
+        if line_buffer.len() > MAX_LINE_LENGTH {
+            return Err(ToggleError::LineTooLong {
+                line_number: current_line,
+                length: line_buffer.len(),
+            });
+        }
+
+        // Handle based on mode
+        match mode {
+            BlockMode::Add => {
+                // ADD mode: INSERT new marker lines adjacent to content
+
+                if current_line == start_line {
+                    // INSERT start marker before this content line
+                    if let Err(_) = writer.write_all(markers.start) {
+                        return Err(ToggleError::IoError(IoOperation::Write));
+                    }
+                    // Then write the content line itself
+                    if let Err(_) = writer.write_all(&line_buffer) {
+                        return Err(ToggleError::IoError(IoOperation::Write));
+                    }
+                } else if current_line == end_line {
+                    // Write the content line first
+                    if let Err(_) = writer.write_all(&line_buffer) {
+                        return Err(ToggleError::IoError(IoOperation::Write));
+                    }
+                    // Then INSERT end marker after this content line
+                    if let Err(_) = writer.write_all(markers.end) {
+                        return Err(ToggleError::IoError(IoOperation::Write));
+                    }
+                } else {
+                    // All other lines: copy unchanged
+                    if let Err(_) = writer.write_all(&line_buffer) {
+                        return Err(ToggleError::IoError(IoOperation::Write));
+                    }
+                }
+            }
+
+            BlockMode::Remove => {
+                // REMOVE mode: DELETE marker lines by skipping them
+
+                if current_line == start_line {
+                    // This line IS the start marker - SKIP it (don't write)
+                    // This deletes the marker line
+                } else if current_line == end_line {
+                    // This line IS the end marker - SKIP it (don't write)
+                    // This deletes the marker line
+                } else {
+                    // All other lines: copy unchanged
+                    if let Err(_) = writer.write_all(&line_buffer) {
+                        return Err(ToggleError::IoError(IoOperation::Write));
+                    }
+                }
+            }
+        }
+
+        current_line += 1;
+    }
+
+    // Flush writer
+    if let Err(_) = writer.flush() {
+        return Err(ToggleError::IoError(IoOperation::Flush));
+    }
+
     Ok(())
+}
+
+#[cfg(test)]
+mod block_comment_tests {
+    use super::*;
+
+    /// Helper: create a temporary test file with given content
+    fn create_test_file(filename: &str, content: &str) -> PathBuf {
+        let path = PathBuf::from(filename);
+        let mut file = File::create(&path).expect("Failed to create test file");
+        file.write_all(content.as_bytes())
+            .expect("Failed to write test file");
+        path
+    }
+
+    /// Helper: read file content as string
+    fn read_file_content(path: &Path) -> String {
+        std::fs::read_to_string(path).expect("Failed to read file")
+    }
+
+    /// Helper: cleanup test files
+    fn cleanup_files(paths: &[&Path]) {
+        for path in paths {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    #[test]
+    fn test_block_comment_add_rust() {
+        let content = "fn main() {\n    println!(\"hello\");\n}\n";
+        let test_file = create_test_file("test_block_add.rs", content);
+
+        // Comment lines 0-2 (entire file)
+        let result = toggle_block_comment(test_file.to_str().unwrap(), 0, 2);
+
+        #[cfg(test)]
+        assert!(result.is_ok());
+
+        let new_content = read_file_content(&test_file);
+        let expected = "/*\nfn main() {\n    println!(\"hello\");\n}\n*/\n";
+
+        #[cfg(test)]
+        assert_eq!(new_content, expected);
+
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_block_test_block_add.rs"),
+        ]);
+    }
+
+    #[test]
+    fn test_block_comment_remove_rust() {
+        let content = "/*\nfn main() {\n    println!(\"hello\");\n}\n*/\n";
+        let test_file = create_test_file("test_block_remove.rs", content);
+
+        // Remove markers at lines 0 and 4
+        let result = toggle_block_comment(test_file.to_str().unwrap(), 0, 4);
+
+        #[cfg(test)]
+        assert!(result.is_ok());
+
+        let new_content = read_file_content(&test_file);
+        let expected = "fn main() {\n    println!(\"hello\");\n}\n";
+
+        #[cfg(test)]
+        assert_eq!(new_content, expected);
+
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_block_test_block_remove.rs"),
+        ]);
+    }
+
+    #[test]
+    fn test_block_comment_inconsistent() {
+        // Only start marker present
+        let content = "/*\nfn main() {}\n";
+        let test_file = create_test_file("test_block_inconsistent.rs", content);
+
+        let result = toggle_block_comment(test_file.to_str().unwrap(), 0, 1);
+
+        #[cfg(test)]
+        assert!(matches!(result, Err(ToggleError::InconsistentBlockMarkers)));
+
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_block_test_block_inconsistent.rs"),
+        ]);
+    }
+
+    #[test]
+    fn test_block_comment_python() {
+        let content = "def hello():\n    print('world')\n";
+        let test_file = create_test_file("test_block.py", content);
+
+        let result = toggle_block_comment(test_file.to_str().unwrap(), 0, 1);
+
+        #[cfg(test)]
+        assert!(result.is_ok());
+
+        let new_content = read_file_content(&test_file);
+        let expected = "\"\"\"\ndef hello():\n    print('world')\n\"\"\"\n";
+
+        #[cfg(test)]
+        assert_eq!(new_content, expected);
+
+        cleanup_files(&[
+            &test_file,
+            &PathBuf::from("backup_toggle_block_test_block.py"),
+        ]);
+    }
 }
 
 // // TODO
