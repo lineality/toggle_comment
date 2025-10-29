@@ -36,7 +36,7 @@ const MAX_SCAN_BYTES: usize = 64;
 const IO_BUFFER_SIZE: usize = 8192;
 
 /// Maximum line length we'll process - safety bound
-const MAX_LINE_LENGTH: usize = 65536; // 64KB per line max
+const MAX_LINE_LENGTH: usize = 1_000_000; // 64KB per line max
 
 /// Errors that can occur during comment toggling operations
 ///
@@ -588,7 +588,7 @@ fn toggle_line(
 // ============================================================================
 
 #[cfg(test)]
-mod tests {
+mod toggle_comment_tests {
     use super::*;
     use std::io::Write;
 
