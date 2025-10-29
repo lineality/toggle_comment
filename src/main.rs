@@ -33,9 +33,9 @@ use std::env;
 use std::process;
 mod toggle_comment_module;
 use toggle_comment_module::{
-    ToggleError, toggle_basic_singleline_comment, toggle_block_comment,
+    IndentError, ToggleError, indent_line, toggle_basic_singleline_comment, toggle_block_comment,
     toggle_multiple_basic_comments, toggle_multiple_singline_docstrings,
-    toggle_rust_docstring_singleline_comment,
+    toggle_rust_docstring_singleline_comment, unindent_line,
 };
 
 /// Maximum number of lines that can be toggled in batch mode
@@ -52,7 +52,10 @@ fn print_usage() {
     eprintln!("  toggle_comment --block <file_path> <start_line> <end_line>");
     eprintln!("  toggle_comment --list-basic <file_path> <line1> <line2> ...");
     eprintln!("  toggle_comment --list-docstring <file_path> <line1> <line2> ...");
+    eprintln!("  toggle_comment --indent <file_path> <line_number>");
+    eprintln!("  toggle_comment --unindent <file_path> <line_number>");
     eprintln!();
+
     eprintln!("MODES:");
     eprintln!("  Basic mode:");
     eprintln!("    Auto-detects comment type from file extension");
@@ -74,24 +77,37 @@ fn print_usage() {
     eprintln!("    Toggle /// comments on multiple lines in one operation");
     eprintln!("    Maximum {} lines per batch", MAX_BATCH_LINES);
     eprintln!();
+    eprintln!("  --indent:");
+    eprintln!("    Add 4 spaces to the start of a line");
+    eprintln!();
+    eprintln!("  --unindent:");
+    eprintln!("    Remove up to 4 spaces from the start of a line");
+    eprintln!();
+
     eprintln!("ARGUMENTS:");
     eprintln!("  file_path    - Path to source code file");
     eprintln!("  line_number  - Line number to toggle (zero-indexed)");
     eprintln!("  start_line   - First line of block (zero-indexed)");
     eprintln!("  end_line     - Last line of block (zero-indexed)");
     eprintln!();
+
     eprintln!("EXAMPLES:");
     eprintln!("  toggle_comment hello_world.py 5");
-    eprintln!("  toggle_comment --rust-doc-string ./src/lib.rs 10");
+    eprintln!("  toggle_comment --rust-doc-string hello_world.py 10");
     eprintln!("  toggle_comment --block hello_world.rs 5 15");
     eprintln!("  toggle_comment --list-basic hello_world.py 1 10 12");
     eprintln!("  toggle_comment --list-docstring hello_world.toml 1 2 3");
-
+    eprintln!("  toggle_comment --indent hello_world.py 10");
+    eprintln!("  toggle_comment --unindent hello_world.py 10");
+    eprintln!("  toggle_comment --indent-range hello_world.py 10 12");
+    eprintln!("  toggle_comment --unindent-range hello_world.py 10 12");
     eprintln!();
+
     eprintln!("SUPPORTED EXTENSIONS:");
     eprintln!("  //  : rs, c, cpp, js, ts, java, go, swift");
     eprintln!("  #   : py, sh, toml, yaml, rb, pl, r");
     eprintln!();
+
     eprintln!("EXIT CODES:");
     eprintln!("  0 - Success");
     eprintln!("  1 - Invalid arguments");
@@ -166,13 +182,33 @@ fn parse_line_list(args: &[String]) -> Result<(usize, [usize; MAX_BATCH_LINES]),
     Ok((count, line_array))
 }
 
+// /// Convert ToggleError to exit code
+// ///
+// /// # Arguments
+// /// * `error` - The error to convert
+// ///
+// /// # Returns
+// /// * Exit code (2-8)
+// fn error_to_exit_code(error: ToggleError) -> i32 {
+//     match error {
+//         ToggleError::FileNotFound => 2,
+//         ToggleError::NoExtension => 3,
+//         ToggleError::UnsupportedExtension => 4,
+//         ToggleError::LineNotFound { .. } => 5,
+//         ToggleError::IoError(_) => 6,
+//         ToggleError::PathError => 7,
+//         ToggleError::LineTooLong { .. } => 8,
+//         ToggleError::InconsistentBlockMarkers => 9,
+//         ToggleError::InvalidLineRange => 10,
+//     }
+// }
 /// Convert ToggleError to exit code
 ///
 /// # Arguments
 /// * `error` - The error to convert
 ///
 /// # Returns
-/// * Exit code (2-8)
+/// * Exit code (2-10)
 fn error_to_exit_code(error: ToggleError) -> i32 {
     match error {
         ToggleError::FileNotFound => 2,
@@ -184,6 +220,52 @@ fn error_to_exit_code(error: ToggleError) -> i32 {
         ToggleError::LineTooLong { .. } => 8,
         ToggleError::InconsistentBlockMarkers => 9,
         ToggleError::InvalidLineRange => 10,
+    }
+}
+
+/// Convert IndentError to exit code
+///
+/// # Arguments
+/// * `error` - The error to convert
+///
+/// # Returns
+/// * Exit code (2-10, same mapping as ToggleError where applicable)
+fn indent_error_to_exit_code(error: IndentError) -> i32 {
+    match error {
+        IndentError::FileNotFound => 2,
+        IndentError::LineNotFound { .. } => 5,
+        IndentError::IoError(_) => 6,
+        IndentError::PathError => 7,
+        IndentError::LineTooLong { .. } => 8,
+        IndentError::InvalidLineRange => 10,
+    }
+}
+
+/// Execute indent on a single line
+fn execute_indent(file_path: &str, line_number: usize) -> i32 {
+    match indent_line(file_path, line_number) {
+        Ok(()) => {
+            println!("Successfully indented line {}", line_number);
+            0
+        }
+        Err(e) => {
+            eprintln!("Error indenting {}: {}", file_path, e);
+            indent_error_to_exit_code(e)
+        }
+    }
+}
+
+/// Execute unindent on a single line
+fn execute_unindent(file_path: &str, line_number: usize) -> i32 {
+    match unindent_line(file_path, line_number) {
+        Ok(()) => {
+            println!("Successfully unindented line {}", line_number);
+            0
+        }
+        Err(e) => {
+            eprintln!("Error unindenting {}: {}", file_path, e);
+            indent_error_to_exit_code(e)
+        }
     }
 }
 
@@ -414,7 +496,80 @@ fn main() {
 
                 execute_batch_toggle_docstring(file_path, count, &line_array)
             }
+            "--indent" => {
+                // Expect: --indent <file> <line>
+                if args.len() != 4 {
+                    eprintln!("Error: --indent requires <file_path> <line_number>");
+                    eprintln!();
+                    print_usage();
+                    process::exit(1);
+                }
 
+                let file_path = &args[2];
+                let line_number = match parse_line_number(&args[3], "line_number") {
+                    Ok(n) => n,
+                    Err(_) => {
+                        print_usage();
+                        process::exit(1);
+                    }
+                };
+
+                execute_indent(file_path, line_number)
+            }
+
+            "--unindent" => {
+                // Expect: --unindent <file> <line>
+                if args.len() != 4 {
+                    eprintln!("Error: --unindent requires <file_path> <line_number>");
+                    eprintln!();
+                    print_usage();
+                    process::exit(1);
+                }
+
+                let file_path = &args[2];
+                let line_number = match parse_line_number(&args[3], "line_number") {
+                    Ok(n) => n,
+                    Err(_) => {
+                        print_usage();
+                        process::exit(1);
+                    }
+                };
+
+                execute_unindent(file_path, line_number)
+            }
+            // "--indent-range" => {
+            //     // Expect: --block <file> <start_line> <end_line>
+            //     if args.len() != 5 {
+            //         eprintln!("Error: --block requires <file_path> <start_line> <end_line>");
+            //         eprintln!();
+            //         print_usage();
+            //         process::exit(1);
+            //     }
+
+            //     let file_path = &args[2];
+            //     let start_line = match parse_line_number(&args[3], "start_line") {
+            //         Ok(n) => n,
+            //         Err(_) => {
+            //             print_usage();
+            //             process::exit(1);
+            //         }
+            //     };
+            //     let end_line = match parse_line_number(&args[4], "end_line") {
+            //         Ok(n) => n,
+            //         Err(_) => {
+            //             print_usage();
+            //             process::exit(1);
+            //         }
+            //     };
+
+            //     // Validate line order
+            //     if start_line >= end_line {
+            //         eprintln!("Error: start_line must be less than end_line");
+            //         process::exit(1);
+            //     }
+
+            //     execute_block_toggle(file_path, start_line, end_line)
+            // }
             _ => {
                 eprintln!("Error: Unknown flag: {}", flag);
                 eprintln!();
