@@ -1,16 +1,17 @@
 # toggle_comment
 
-A safe, Rust crate to toggle comments in source code files.
-This is intended to be a module for other project, but
-it can be used directly.
+A Rust crate to toggle comments and indent/unindent lines in files.
+This is intended to be a module to be included in other projects, but
+this can be used directly if only for testing.
 
-
-
-# Four Principle Areas of Functionality
+# Six Principle Areas of Functionality
 ### Toggle Back and Forth
-- single line comments (# or //)
-- rust doc strings (///)
-- list of single lines to toggle
+1. single line to toggle-comment (# or //)
+2. rust doc strings stye to single line toggle-comment(///)
+3. list of single lines to toggle-comment
+4. a range/a block of rows to toggle-comment
+5. indent/unindent a single line (+/- four spaces)
+6. indent/unindent a range of lines (+/- four spaces)
 
 ### Line-Changes, So cannot "toggle" simplistically
 - text 'block' (/* comment */ or """comment""")
@@ -49,6 +50,54 @@ use toggle_comment::toggle_multiple_basic_comments;
 let lines = [5, 10, 15, 20];
 toggle_multiple_basic_comments("./src/lib.rs", &lines)?;
 ```
+
+## Indent Single Line
+
+Add 4 spaces to the start of a line:
+
+```rust
+use toggle_comment::indent_line;
+
+// Indent line 5 of a file
+indent_line("./src/main.rs", 5)?;
+```
+
+## Unindent Single Line
+
+Remove up to 4 spaces from the start of a line:
+
+```rust
+use toggle_comment::unindent_line;
+
+// Unindent line 5 of a file
+unindent_line("./src/main.rs", 5)?;
+```
+
+
+## Indent Range
+
+Add 4 spaces to the start of multiple lines (inclusive range):
+
+```rust
+use toggle_comment::indent_range;
+
+// Indent lines 5 through 15 (inclusive)
+indent_range("./src/main.rs", 5, 15)?;
+```
+
+
+## Unindent Range
+
+Remove up to 4 spaces from the start of multiple lines (inclusive range):
+
+```rust
+use toggle_comment::unindent_range;
+
+// Unindent lines 5 through 15 (inclusive)
+unindent_range("./src/main.rs", 5, 15)?;
+```
+
+
 
 ## Supported Languages
 This module needs the file to have a file extension.
