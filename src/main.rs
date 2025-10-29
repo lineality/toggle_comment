@@ -1,24 +1,24 @@
-//! Command-line interface for toggle_comment crate
+//! Command-line interface for toggle_basic_singleline_comment crate
 //!
-//! Usage: toggle_comment <file_path> <line_number>
+//! Usage: toggle_basic_singleline_comment <file_path> <line_number>
 //!
-//! Example: toggle_comment ./src/main.rs 5
+//! Example: toggle_basic_singleline_comment ./src/main.rs 5
 
 use std::env;
 use std::process;
 mod toggle_comment_module;
-use toggle_comment_module::{ToggleError, toggle_comment};
+use toggle_comment_module::{ToggleError, toggle_basic_singleline_comment};
 
 /// Print usage information and exit
 fn print_usage() {
-    eprintln!("Usage: toggle_comment <file_path> <line_number>");
+    eprintln!("Usage: toggle_basic_singleline_comment <file_path> <line_number>");
     eprintln!();
     eprintln!("Arguments:");
     eprintln!("  file_path    - Path to source code file");
     eprintln!("  line_number  - Line number to toggle (zero-indexed)");
     eprintln!();
     eprintln!("Example:");
-    eprintln!("  toggle_comment ./src/main.rs 5");
+    eprintln!("  toggle_basic_singleline_comment ./src/main.rs 5");
     eprintln!();
     eprintln!("Supported extensions:");
     eprintln!("  // : rs, c, cpp, js, ts, java, go, swift");
@@ -47,8 +47,12 @@ fn main() {
         }
     };
 
-    // Execute toggle_comment
-    match toggle_comment(file_path, line_number) {
+    // Execute toggle_basic_singleline_comment
+    // Run toggle comment
+    // return standard exit code:
+    // zero is ok
+    // error has number above zero
+    match toggle_basic_singleline_comment(file_path, line_number) {
         Ok(()) => {
             println!("Successfully toggled comment on line {}", line_number);
             process::exit(0);
@@ -58,12 +62,12 @@ fn main() {
 
             // Return specific exit codes for different error types
             let exit_code = match e {
-                ToggleError::FileNotFound(_) => 2,
-                ToggleError::NoExtension(_) => 3,
-                ToggleError::UnsupportedExtension(_) => 4,
+                ToggleError::FileNotFound => 2,
+                ToggleError::NoExtension => 3,
+                ToggleError::UnsupportedExtension => 4,
                 ToggleError::LineNotFound { .. } => 5,
                 ToggleError::IoError { .. } => 6,
-                ToggleError::PathError(_) => 7,
+                ToggleError::PathError => 7,
                 ToggleError::LineTooLong { .. } => 8,
             };
 

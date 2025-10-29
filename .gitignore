@@ -2,6 +2,10 @@
 # will have compiled files and executables
 debug
 target
+testing
+archive
+
+code_archive.txt
 
 backup_toggle_comment_*
 
