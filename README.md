@@ -9,12 +9,14 @@ this can be used directly if only for testing.
 1. single line to toggle-comment (# or //)
 2. rust doc strings stye to single line toggle-comment(///)
 3. list of single lines to toggle-comment
-4. a range/a block of rows to toggle-comment
-5. indent/unindent a single line (+/- four spaces)
-6. indent/unindent a range of lines (+/- four spaces)
 
 ### Line-Changes, So cannot "toggle" simplistically
+4. quasi-toggles "block-comment" /*commment*/ or """comment"""
 - text 'block' (/* comment */ or """comment""")
+
+### Indent
+5. indent/unindent a single line (+/- four spaces)
+6. indent/unindent a range of lines (+/- four spaces)
 
 ## Toggle Single Line Comment
 ```rust
