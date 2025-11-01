@@ -5,6 +5,11 @@ target
 testing
 archive
 
+test_block_single_line.rs
+test_indent_range_invalid.txt
+test_unindent_range_invalid.txt
+
+
 code_archive.txt
 
 backup_toggle_comment_*

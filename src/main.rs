@@ -35,6 +35,7 @@ mod toggle_comment_module;
 use toggle_comment_module::{
     IndentError, ToggleError, indent_line, indent_range, toggle_basic_singleline_comment,
     toggle_block_comment, toggle_multiple_basic_comments, toggle_multiple_singline_docstrings,
+    toggle_range_basic_comments, toggle_range_rust_docstring,
     toggle_rust_docstring_singleline_comment, unindent_line, unindent_range,
 };
 
@@ -127,6 +128,40 @@ fn print_usage() {
     eprintln!("  8 - Line too long");
 }
 
+/// Execute range toggle - basic comments
+fn execute_range_toggle_basic(file_path: &str, start_line: usize, end_line: usize) -> i32 {
+    match toggle_range_basic_comments(file_path, start_line, end_line) {
+        Ok(()) => {
+            println!(
+                "Successfully toggled comment range (lines {}-{})",
+                start_line, end_line
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!("Error toggling range {}: {}", file_path, e);
+            error_to_exit_code(e)
+        }
+    }
+}
+
+/// Execute range toggle - rust docstrings
+fn execute_range_toggle_docstring(file_path: &str, start_line: usize, end_line: usize) -> i32 {
+    match toggle_range_rust_docstring(file_path, start_line, end_line) {
+        Ok(()) => {
+            println!(
+                "Successfully toggled docstring range (lines {}-{})",
+                start_line, end_line
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!("Error toggling docstring range {}: {}", file_path, e);
+            error_to_exit_code(e)
+        }
+    }
+}
+
 /// Parse a line number argument, returning error on invalid input
 ///
 /// # Arguments
@@ -206,7 +241,7 @@ fn error_to_exit_code(error: ToggleError) -> i32 {
         ToggleError::PathError => 7,
         ToggleError::LineTooLong { .. } => 8,
         ToggleError::InconsistentBlockMarkers => 9,
-        ToggleError::InvalidLineRange => 10,
+        ToggleError::RangeTooLarge { .. } => 10,
     }
 }
 
@@ -224,7 +259,6 @@ fn indent_error_to_exit_code(error: IndentError) -> i32 {
         IndentError::IoError(_) => 6,
         IndentError::PathError => 7,
         IndentError::LineTooLong { .. } => 8,
-        IndentError::InvalidLineRange => 10,
     }
 }
 
@@ -601,6 +635,67 @@ fn main() {
                 }
 
                 execute_unindent_range(file_path, start_line, end_line)
+            }
+            "--toggle-range-comment-basic" => {
+                // Expect: --toggle-range-comment-basic <file> <start_line> <end_line>
+                if args.len() != 5 {
+                    eprintln!(
+                        "Error: --toggle-range-comment-basic requires <file_path> <start_line> <end_line>"
+                    );
+                    eprintln!();
+                    print_usage();
+                    process::exit(1);
+                }
+
+                let file_path = &args[2];
+                let start_line = match parse_line_number(&args[3], "start_line") {
+                    Ok(n) => n,
+                    Err(_) => {
+                        print_usage();
+                        process::exit(1);
+                    }
+                };
+                let end_line = match parse_line_number(&args[4], "end_line") {
+                    Ok(n) => n,
+                    Err(_) => {
+                        print_usage();
+                        process::exit(1);
+                    }
+                };
+
+                // Note: No validation needed - function auto-sorts and validates
+                execute_range_toggle_basic(file_path, start_line, end_line)
+            }
+
+            "--toggle-range-rust-docstring" => {
+                // Expect: --toggle-range-rust-docstring <file> <start_line> <end_line>
+                if args.len() != 5 {
+                    eprintln!(
+                        "Error: --toggle-range-rust-docstring requires <file_path> <start_line> <end_line>"
+                    );
+                    eprintln!();
+                    print_usage();
+                    process::exit(1);
+                }
+
+                let file_path = &args[2];
+                let start_line = match parse_line_number(&args[3], "start_line") {
+                    Ok(n) => n,
+                    Err(_) => {
+                        print_usage();
+                        process::exit(1);
+                    }
+                };
+                let end_line = match parse_line_number(&args[4], "end_line") {
+                    Ok(n) => n,
+                    Err(_) => {
+                        print_usage();
+                        process::exit(1);
+                    }
+                };
+
+                // Note: No validation needed - function auto-sorts and validates
+                execute_range_toggle_docstring(file_path, start_line, end_line)
             }
             _ => {
                 eprintln!("Error: Unknown flag: {}", flag);
