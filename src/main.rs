@@ -33,9 +33,9 @@ use std::env;
 use std::process;
 mod toggle_comment_indent_module;
 use toggle_comment_indent_module::{
-    IndentError, ToggleError, indent_line, indent_range, toggle_basic_singleline_comment,
-    toggle_block_comment, toggle_multiple_basic_comments, toggle_multiple_singline_docstrings,
-    toggle_range_basic_comments, toggle_range_rust_docstring,
+    ToggleCommentError, ToggleIndentError, indent_line, indent_range,
+    toggle_basic_singleline_comment, toggle_block_comment, toggle_multiple_basic_comments,
+    toggle_multiple_singline_docstrings, toggle_range_basic_comments, toggle_range_rust_docstring,
     toggle_rust_docstring_singleline_comment, unindent_line, unindent_range,
 };
 
@@ -224,41 +224,41 @@ fn parse_line_list(args: &[String]) -> Result<(usize, [usize; MAX_BATCH_LINES]),
     Ok((count, line_array))
 }
 
-/// Convert ToggleError to exit code
+/// Convert ToggleCommentError to exit code
 ///
 /// # Arguments
 /// * `error` - The error to convert
 ///
 /// # Returns
 /// * Exit code (2-10)
-fn error_to_exit_code(error: ToggleError) -> i32 {
+fn error_to_exit_code(error: ToggleCommentError) -> i32 {
     match error {
-        ToggleError::FileNotFound => 2,
-        ToggleError::NoExtension => 3,
-        ToggleError::UnsupportedExtension => 4,
-        ToggleError::LineNotFound { .. } => 5,
-        ToggleError::IoError(_) => 6,
-        ToggleError::PathError => 7,
-        ToggleError::LineTooLong { .. } => 8,
-        ToggleError::InconsistentBlockMarkers => 9,
-        ToggleError::RangeTooLarge { .. } => 10,
+        ToggleCommentError::FileNotFound => 2,
+        ToggleCommentError::NoExtension => 3,
+        ToggleCommentError::UnsupportedExtension => 4,
+        ToggleCommentError::LineNotFound { .. } => 5,
+        ToggleCommentError::IoError(_) => 6,
+        ToggleCommentError::PathError => 7,
+        ToggleCommentError::LineTooLong { .. } => 8,
+        ToggleCommentError::InconsistentBlockMarkers => 9,
+        ToggleCommentError::RangeTooLarge { .. } => 10,
     }
 }
 
-/// Convert IndentError to exit code
+/// Convert ToggleIndentError to exit code
 ///
 /// # Arguments
 /// * `error` - The error to convert
 ///
 /// # Returns
-/// * Exit code (2-10, same mapping as ToggleError where applicable)
-fn indent_error_to_exit_code(error: IndentError) -> i32 {
+/// * Exit code (2-10, same mapping as ToggleCommentError where applicable)
+fn indent_error_to_exit_code(error: ToggleIndentError) -> i32 {
     match error {
-        IndentError::FileNotFound => 2,
-        IndentError::LineNotFound { .. } => 5,
-        IndentError::IoError(_) => 6,
-        IndentError::PathError => 7,
-        IndentError::LineTooLong { .. } => 8,
+        ToggleIndentError::FileNotFound => 2,
+        ToggleIndentError::LineNotFound { .. } => 5,
+        ToggleIndentError::IoError(_) => 6,
+        ToggleIndentError::PathError => 7,
+        ToggleIndentError::LineTooLong { .. } => 8,
     }
 }
 
