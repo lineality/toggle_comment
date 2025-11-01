@@ -4,6 +4,7 @@ debug
 target
 testing
 archive
+tests
 
 test_block_single_line.rs
 test_indent_range_invalid.txt

@@ -1847,27 +1847,6 @@ fn process_block_toggle(
 mod block_comment_tests {
     use super::*;
 
-    /// Helper: create a temporary test file with given content
-    fn create_test_file(filename: &str, content: &str) -> PathBuf {
-        let path = PathBuf::from(filename);
-        let mut file = File::create(&path).expect("Failed to create test file");
-        file.write_all(content.as_bytes())
-            .expect("Failed to write test file");
-        path
-    }
-
-    /// Helper: read file content as string
-    fn read_file_content(path: &Path) -> String {
-        std::fs::read_to_string(path).expect("Failed to read file")
-    }
-
-    /// Helper: cleanup test files
-    fn cleanup_files(paths: &[&Path]) {
-        for path in paths {
-            let _ = std::fs::remove_file(path);
-        }
-    }
-
     #[test]
     fn test_block_comment_add_rust() {
         let content = "fn main() {\n    println!(\"hello\");\n}\n";
@@ -2278,27 +2257,6 @@ pub fn toggle_multiple_singline_docstrings(
 mod batch_tests {
     use super::*;
 
-    /// Helper: create a temporary test file with given content
-    fn create_test_file(filename: &str, content: &str) -> PathBuf {
-        let path = PathBuf::from(filename);
-        let mut file = File::create(&path).expect("Failed to create test file");
-        file.write_all(content.as_bytes())
-            .expect("Failed to write test file");
-        path
-    }
-
-    /// Helper: read file content as string
-    fn read_file_content(path: &Path) -> String {
-        std::fs::read_to_string(path).expect("Failed to read file")
-    }
-
-    /// Helper: cleanup test files
-    fn cleanup_files(paths: &[&Path]) {
-        for path in paths {
-            let _ = std::fs::remove_file(path);
-        }
-    }
-
     #[test]
     fn test_batch_toggle_multiple_lines() {
         let content = "line 0\nline 1\nline 2\nline 3\nline 4\n";
@@ -2656,32 +2614,37 @@ fn toggle_line(
 // ============================================================================
 // TESTS
 // ============================================================================
+#[cfg(test)]
+/// Helper: create a temporary test file with given content
+fn create_test_file(filename: &str, content: &str) -> PathBuf {
+    use std::io::Write;
+    // Create tests directory if it doesn't exist
+    let tests_dir = PathBuf::from("./tests");
+    std::fs::create_dir_all(&tests_dir).expect("Failed to create tests directory");
+
+    // Create file path within tests directory
+    let path = tests_dir.join(filename);
+    let mut file = File::create(&path).expect("Failed to create test file");
+    file.write_all(content.as_bytes())
+        .expect("Failed to write test file");
+    path
+}
+#[cfg(test)]
+/// Helper: read file content as string
+fn read_file_content(path: &Path) -> String {
+    std::fs::read_to_string(path).expect("Failed to read file")
+}
+#[cfg(test)]
+/// Helper: cleanup test files
+fn cleanup_files(paths: &[&Path]) {
+    for path in paths {
+        let _ = std::fs::remove_file(path);
+    }
+}
 
 #[cfg(test)]
 mod toggle_comment_tests {
     use super::*;
-    use std::io::Write;
-
-    /// Helper: create a temporary test file with given content
-    fn create_test_file(filename: &str, content: &str) -> PathBuf {
-        let path = PathBuf::from(filename);
-        let mut file = File::create(&path).expect("Failed to create test file");
-        file.write_all(content.as_bytes())
-            .expect("Failed to write test file");
-        path
-    }
-
-    /// Helper: read file content as string
-    fn read_file_content(path: &Path) -> String {
-        std::fs::read_to_string(path).expect("Failed to read file")
-    }
-
-    /// Helper: cleanup test files
-    fn cleanup_files(paths: &[&Path]) {
-        for path in paths {
-            let _ = std::fs::remove_file(path);
-        }
-    }
 
     #[test]
     fn test_determine_comment_flag() {
@@ -3731,27 +3694,6 @@ pub fn unindent_single_line(
 mod indent_tests {
     use super::*;
 
-    /// Helper: create a temporary test file with given content
-    fn create_test_file(filename: &str, content: &str) -> PathBuf {
-        let path = PathBuf::from(filename);
-        let mut file = File::create(&path).expect("Failed to create test file");
-        file.write_all(content.as_bytes())
-            .expect("Failed to write test file");
-        path
-    }
-
-    /// Helper: read file content as string
-    fn read_file_content(path: &Path) -> String {
-        std::fs::read_to_string(path).expect("Failed to read file")
-    }
-
-    /// Helper: cleanup test files
-    fn cleanup_files(paths: &[&Path]) {
-        for path in paths {
-            let _ = std::fs::remove_file(path);
-        }
-    }
-
     // ========================================
     // Indent Tests
     // ========================================
@@ -4644,27 +4586,6 @@ pub fn toggle_range_rust_docstring(
 mod range_toggle_tests {
     use super::*;
 
-    /// Helper: create a temporary test file with given content
-    fn create_test_file(filename: &str, content: &str) -> PathBuf {
-        let path = PathBuf::from(filename);
-        let mut file = File::create(&path).expect("Failed to create test file");
-        file.write_all(content.as_bytes())
-            .expect("Failed to write test file");
-        path
-    }
-
-    /// Helper: read file content as string
-    fn read_file_content(path: &Path) -> String {
-        std::fs::read_to_string(path).expect("Failed to read file")
-    }
-
-    /// Helper: cleanup test files
-    fn cleanup_files(paths: &[&Path]) {
-        for path in paths {
-            let _ = std::fs::remove_file(path);
-        }
-    }
-
     // ========================================
     // sort_range() Tests
     // ========================================
@@ -5318,27 +5239,6 @@ fn process_file_unindent_range(
 #[cfg(test)]
 mod indent_range_tests {
     use super::*;
-
-    /// Helper: create a temporary test file with given content
-    fn create_test_file(filename: &str, content: &str) -> PathBuf {
-        let path = PathBuf::from(filename);
-        let mut file = File::create(&path).expect("Failed to create test file");
-        file.write_all(content.as_bytes())
-            .expect("Failed to write test file");
-        path
-    }
-
-    /// Helper: read file content as string
-    fn read_file_content(path: &Path) -> String {
-        std::fs::read_to_string(path).expect("Failed to read file")
-    }
-
-    /// Helper: cleanup test files
-    fn cleanup_files(paths: &[&Path]) {
-        for path in paths {
-            let _ = std::fs::remove_file(path);
-        }
-    }
 
     // ========================================
     // Indent Range Tests
