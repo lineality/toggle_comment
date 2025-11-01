@@ -1,5 +1,7 @@
 //! # toggle_comment_indent_module.rs
 //!
+//! https://github.com/lineality/toggle_comment_indent
+//!
 //! A simple, safe Rust crate to toggle comment flags in source code files.
 //!
 //! ## Overview
@@ -111,37 +113,98 @@
 //! }
 //! ```
 //!
-//! ### Toggle Rust Docstring
-//! ```rust
-//! use toggle_basic_singleline_comment::toggle_rust_docstring_singleline_comment;
+//!  ## Toggle Single Line Comment
+//!  ```rust
+//!  use toggle_comment_indent_module::toggle_basic_singleline_comment;
 //!
-//! match toggle_rust_docstring_singleline_comment("./src/lib.rs", 10) {
-//!     Ok(()) => println!("Docstring toggled"),
-//!     Err(e) => eprintln!("Failed: {}", e),
-//! }
+//!  // Auto-detects `//` or `#` from file extension
+//!  toggle_basic_singleline_comment("./script.py", 5)?;   // → `// code`
+//!  toggle_basic_singleline_comment("./script.py", 3)?; // → `# code`
+//!  ```
+//!
+//!  ## Toggle Rust Docstring
+//!  ```rust
+//!  use toggle_comment_indent_module::toggle_rust_docstring_singleline_comment;
+//!
+//! // Use `///` instead of `//`
+//! toggle_rust_docstring_singleline_comment("./script.py", 10)?;
 //! ```
 //!
-//! ### Toggle Block Comment
+//! ## Toggle Block Comments
 //! ```rust
-//! use toggle_basic_singleline_comment::toggle_block_comment;
+//! use toggle_comment_indent_module::toggle_block_comment;
 //!
-//! // Toggle block markers around lines 5-10
-//! match toggle_block_comment("./src/lib.rs", 5, 10) {
-//!     Ok(()) => println!("Block comment toggled"),
-//!     Err(e) => eprintln!("Failed: {}", e),
-//! }
+//! // Automatically add/remove markers around lines 5-10
+//! // Detects: /* */ for C/Rust, """ for Python
+//! toggle_block_comment("./script.py", 5, 10)?;
 //! ```
 //!
-//! ### Batch Toggle Multiple Lines
+//! ## Batch Toggle Multiple Lines
 //! ```rust
-//! use toggle_basic_singleline_comment::toggle_multiple_basic_comments;
+//! use toggle_comment_indent_module::toggle_multiple_basic_comments;
 //!
+//! // Toggle lines 5, 10, 15, 20 in one pass
 //! let lines = [5, 10, 15, 20];
-//! match toggle_multiple_basic_comments("./src/main.rs", &lines) {
-//!     Ok(()) => println!("All 4 lines toggled in one pass"),
-//!     Err(e) => eprintln!("Failed: {}", e),
-//! }
+//! toggle_multiple_basic_comments("./script.py", &lines)?;
 //! ```
+//!
+// ## Indent Single Line
+//!
+//! Add 4 spaces to the start of a line:
+//!
+//! ```rust
+//! use toggle_comment_indent_module::indent_line;
+//!
+//! // Indent line 5 of a file
+//! indent_line("./script.py", 5)?;
+//! ```
+//!
+//! ## Unindent Single Line
+//!
+//! Remove up to 4 spaces from the start of a line:
+//!
+//!```rust
+//!use toggle_comment_indent_module::unindent_line;
+//!
+//!// Unindent line 5 of a file
+//!unindent_line("./script.py", 5)?;
+//!```
+//!
+//!## Indent Range
+//!
+//!Add 4 spaces to the start of multiple lines (inclusive range):
+//!
+//!```rust
+//!use toggle_comment_indent_module::indent_range;
+//!
+//!// Indent lines 5 through 15 (inclusive)
+//!indent_range("./script.py", 5, 15)?;
+//!```
+//!
+//!## Unindent Range
+//!
+//!Remove up to 4 spaces from the start of multiple lines (inclusive range):
+//!
+//!```rust
+//!use toggle_comment_indent_module::unindent_range;
+//!
+//!// Unindent lines 5 through 15 (inclusive)
+//!unindent_range("./script.py", 5, 15)?;
+//!```
+//!
+//!## Toggle Block Range Standard-Comment
+//!```rust
+//!use toggle_comment_indent_module::execute_range_toggle_basic;
+//!
+//!execute_range_toggle_basic(file_path, start_line, end_line)
+//!```
+//!
+//!## ~Toggle Block Rust-Docstring
+//!```rust
+//!use toggle_comment_indent_module::execute_range_toggle_docstring;
+//!
+//!execute_range_toggle_docstring(file_path, start_line, end_line)
+//!```
 //!
 //! ## Limitations & Edge Cases
 //!
