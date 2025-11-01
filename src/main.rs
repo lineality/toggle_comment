@@ -31,8 +31,8 @@
 
 use std::env;
 use std::process;
-mod toggle_comment_module;
-use toggle_comment_module::{
+mod toggle_comment_indent_module;
+use toggle_comment_indent_module::{
     IndentError, ToggleError, indent_line, indent_range, toggle_basic_singleline_comment,
     toggle_block_comment, toggle_multiple_basic_comments, toggle_multiple_singline_docstrings,
     toggle_range_basic_comments, toggle_range_rust_docstring,

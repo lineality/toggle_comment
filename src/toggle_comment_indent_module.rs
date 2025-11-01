@@ -1,4 +1,4 @@
-//! # toggle_comment_module.rs
+//! # toggle_comment_indent_module.rs
 //!
 //! A simple, safe Rust crate to toggle comment flags in source code files.
 //!
@@ -268,8 +268,8 @@ reliably in this system, not to micro-manage the rest of the universe.
 
 use std::env;
 use std::process;
-mod toggle_comment_module;
-use toggle_comment_module::{
+mod toggle_comment_indent_module;
+use toggle_comment_indent_module::{
     IndentError, ToggleError, indent_line, indent_range, toggle_basic_singleline_comment,
     toggle_block_comment, toggle_multiple_basic_comments, toggle_multiple_singline_docstrings,
     toggle_range_basic_comments, toggle_range_rust_docstring,
@@ -3191,7 +3191,7 @@ impl std::error::Error for IndentError {}
 ///
 /// # Example
 /// ```no_run
-/// use toggle_comment_module::indent_line;
+/// use toggle_comment_indent_module::indent_line;
 ///
 /// match indent_line("./src/main.rs", 5) {
 ///     Ok(()) => println!("Line indented"),
@@ -3289,7 +3289,7 @@ pub fn indent_line(file_path: &str, line_number: usize) -> Result<(), IndentErro
 ///
 /// # Example
 /// ```no_run
-/// use toggle_comment_module::unindent_line;
+/// use toggle_comment_indent_module::unindent_line;
 ///
 /// match unindent_line("./src/main.rs", 5) {
 ///     Ok(()) => println!("Line unindented"),
@@ -4017,7 +4017,7 @@ fn sort_range(from: usize, to: usize) -> (usize, usize) {
 ///
 /// # Example
 /// ```no_run
-/// use toggle_comment_module::indent_range;
+/// use toggle_comment_indent_module::indent_range;
 ///
 /// // Both calls equivalent (auto-sorted):
 /// indent_range("./src/main.rs", 5, 10)?;
@@ -4106,7 +4106,7 @@ pub fn indent_range(
 ///
 /// # Example
 /// ```no_run
-/// use toggle_comment_module::unindent_range;
+/// use toggle_comment_indent_module::unindent_range;
 ///
 /// // Both calls equivalent (auto-sorted):
 /// unindent_range("./src/main.rs", 5, 10)?;
@@ -4345,7 +4345,7 @@ fn process_range_toggle(
 ///
 /// # Example
 /// ```no_run
-/// use toggle_comment_module::toggle_range_basic_comments;
+/// use toggle_comment_indent_module::toggle_range_basic_comments;
 ///
 /// // Toggle lines 5-10 (both inclusive)
 /// match toggle_range_basic_comments("./src/main.rs", 5, 10) {
@@ -4482,7 +4482,7 @@ pub fn toggle_range_basic_comments(
 ///
 /// # Example
 /// ```no_run
-/// use toggle_comment_module::toggle_range_rust_docstring;
+/// use toggle_comment_indent_module::toggle_range_rust_docstring;
 ///
 /// // Toggle docstrings on lines 5-10 (both inclusive)
 /// match toggle_range_rust_docstring("./src/lib.rs", 5, 10) {

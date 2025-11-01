@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "toggle_comment"
+name = "toggle_comment_indent"
 version = "0.1.0"
